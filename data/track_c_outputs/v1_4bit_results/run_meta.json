@@ -1,0 +1,8 @@
+{
+  "entropy_csv": "entropy_ranks.csv",
+  "baseline_csv": "chair_labels.csv",
+  "vegas_csv": "captions_vegas.csv",
+  "coco_ann": "coco/annotations/instances_val2017.json",
+  "n_images": 500,
+  "bootstrap_iters": 1000
+}

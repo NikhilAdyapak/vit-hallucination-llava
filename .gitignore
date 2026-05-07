@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
+.DS_Store
+*.npz
+*.zip
+*.tar.gz
+.venv/
+venv/
+env/
+*.swp
+.idea/
+.vscode/

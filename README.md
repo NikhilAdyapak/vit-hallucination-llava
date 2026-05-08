@@ -43,8 +43,15 @@ We test whether the CLIP ViT-L/14 visual encoder inside LLaVA-1.5-7B is producin
 │       ├── captions_vanilla_4bit.csv       4-bit vanilla captions (Approach 1)
 │       ├── captions_vegas.csv              4-bit VEGAS captions (Approach 1)
 │       └── v1_4bit_results/                Bootstrap CIs, deltas, figures
-├── figures/                                Track A figures
-└── reports/                                Final report + proposal + AB progress + rubric
+├── figures/                                All 14 figures used in the final report
+└── reports/                                Final report (LaTeX + PDF) + proposal + rubric + AB progress
+    ├── Final_Report.tex                    LaTeX source for the final report
+    ├── CS639_FinalReport.pdf               Compiled final report (20 pages, with figures)
+    ├── figures/                            Same figures, kept here for LaTeX compilation
+    ├── CS639_Proposal_Final.pdf            One-page proposal
+    ├── project_rubric.pdf                  Course grading rubric
+    ├── track_AB_report.pdf                 Earlier Track A+B progress report
+    └── ReportAB639.pdf                     Companion analysis of Tracks A+B
 ```
 
 ## How to Reproduce
@@ -62,9 +69,9 @@ We test whether the CLIP ViT-L/14 visual encoder inside LLaVA-1.5-7B is producin
 
 ## Final Report
 
-`reports/CS639_FinalReport.pdf`
+`reports/CS639_FinalReport.pdf` — 20 pages, includes all 14 figures and tables.
 
-The LaTeX source is in `reports/Final_Report.tex`. The earlier draft (`CS639_FinalReport_initial_draft.pdf`) is kept for reference but is superseded.
+The LaTeX source is in `reports/Final_Report.tex`. To recompile from source, place the .tex and the `figures/` subfolder in the same directory and run any LaTeX engine (e.g. `pdflatex Final_Report.tex` twice for cross-references, or `tectonic Final_Report.tex` for a single-pass build).
 
 ## License
 

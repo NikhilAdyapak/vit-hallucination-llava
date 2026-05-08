@@ -1,466 +1,1106 @@
+% ============================================================
+%  Locating the Source of Hallucination in LLaVA-1.5
+%  CS 639 Final Report  --  Spring 2026
+%  University of Wisconsin-Madison
+% ============================================================
 \documentclass[11pt]{article}
 
-\usepackage[margin=1in]{geometry}
+\usepackage[margin=1in,top=0.85in,bottom=1in]{geometry}
+\usepackage{fancyhdr}
+\usepackage{amsmath,amssymb}
 \usepackage{graphicx}
 \usepackage{booktabs}
-\usepackage{amsmath}
-\usepackage{amssymb}
-\usepackage{amsfonts}
-\usepackage{bbm}
-\usepackage{caption}
-\usepackage{subcaption}
-\usepackage{hyperref}
-\usepackage{enumitem}
-\usepackage{xcolor}
-\usepackage{fancyhdr}
-\usepackage{titlesec}
-\usepackage{microtype}
-\usepackage{tcolorbox}
+\usepackage{multirow}
 \usepackage{array}
 \usepackage{url}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage{hyperref}
+\usepackage{microtype}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{float}
+\usepackage{framed}
+\usepackage{xcolor}
+\usepackage{parskip}
 
 \hypersetup{
-    colorlinks=true,
-    linkcolor=black,
-    urlcolor=blue!60!black,
-    citecolor=black,
+  colorlinks=true,
+  linkcolor=black,
+  citecolor=black,
+  urlcolor=blue
 }
 
-\titleformat{\section}{\bfseries\large}{\thesection}{1em}{}
-\titleformat{\subsection}{\bfseries\normalsize}{\thesubsection}{1em}{}
-\titlespacing*{\section}{0pt}{12pt}{6pt}
-\titlespacing*{\subsection}{0pt}{8pt}{4pt}
-
-\setlength{\parskip}{5pt}
-\setlength{\parindent}{0pt}
-
+% ---- header / footer ----------------------------------------
 \pagestyle{fancy}
 \fancyhf{}
-\fancyhead[L]{\small ViT Hallucination Research}
-\fancyhead[R]{\small CS 639 Spring 2026}
-\fancyfoot[C]{\small \thepage}
+\lhead{\small ViT Hallucination Research}
+\rhead{\small CS 639 : Introduction to Foundation Models}
+\cfoot{\thepage}
 \renewcommand{\headrulewidth}{0.4pt}
 
-\newcommand{\repourl}{\url{https://github.com/NikhilAdyapak/vit-hallucination-llava}}
+% ---- spacing ------------------------------------------------
+\setlength{\parskip}{5pt}
+\setlength{\parindent}{0pt}
+\captionsetup{font=small, labelfont=bf}
 
-\title{\vspace{-25pt}\textbf{Locating the Source of Hallucination in LLaVA-1.5:\\A Three-Track Empirical Investigation of the ViT Visual Encoder}}
-\author{Arihant Jha \quad Saurabh Rajesh Pandey \quad Yuvarraj Sriramkumar \\
-Nikhil Adyapak \quad Asish Das \quad Siddhartha Pathapati \\[2pt]
-\small University of Wisconsin--Madison \\
-\small CS 639: Introduction to Foundation Models, Spring 2026 \\[2pt]
-\small Code and data: \repourl}
-\date{\vspace{-8pt}May 2026}
+% ---- column width shorthand ---------------------------------
+\newcommand{\cw}{\columnwidth}
 
+% ---- figure path: keep figures in figures/ subfolder --------
+\graphicspath{{figures/}{./}}
+
+% ============================================================
 \begin{document}
-\maketitle
-\thispagestyle{fancy}
+% ============================================================
 
-\vspace{-12pt}
-\begin{tcolorbox}[colback=gray!5,colframe=gray!40,boxrule=0.4pt,arc=2pt,
-    left=8pt,right=8pt,top=6pt,bottom=6pt]
-\textbf{Abstract.} Vision-language models (VLMs) hallucinate objects that are not present in the input image. Most prior work treats this as a decoder-side failure and leaves the visual encoder unexamined. We ask the opposite question: is the ViT encoder already producing degraded representations on images where LLaVA-1.5-7B later hallucinates? We test this through three controlled experiments on 500 COCO 2017 validation images. Track A (attention rollout entropy) finds no relationship between [CLS] attention spread and hallucination outcome ($\rho = 0.003$, $p = 0.94$, Cohen's $d = 0.039$). Track B (linear probes on patch embeddings at four ViT layers) finds the opposite: object discriminability is uniformly lower on hallucinating images at every probed layer ($\Delta\text{acc} \in [-0.039, -0.027]$, Wilcoxon $p < 0.005$ at all layers). Track C is reported in three configurations. Approach 1 uses 4-bit NF4 LLaVA-1.5-7B with hidden-state steering at LLM layers 14--15 and stratifies images by Track A entropy quartiles, finding directional VEGAS backfire on diffuse-attention images ($\Delta \text{CHAIR}_i = +0.021$, $P(\Delta \geq 0) = 0.929$). Approach 2 uses full fp16 LLaVA-1.5-7B and runs two complementary tests: a quality-stratified VEGAS falsification that returns zero effect because rollout-derived concentration is uniformly near zero, and a causal patch-ablation experiment at layer 18 (Track B's sweet spot) that finds top-K, bottom-K, and random ablations produce equivalent CHAIR changes. A patch-swap follow-up shows random-donor swaps significantly increase hallucination ($p = 0.0028$) while matched-clean swaps have no effect ($p = 0.148$). Together the three tracks support a refined hypothesis: the ViT encoder fails on hallucinating images in feature content, not in attention geometry, and attention-based steering methods such as VEGAS have a structural blind spot in this failure mode.
-\end{tcolorbox}
+% ---- title block --------------------------------------------
+\begin{center}
+{\LARGE\bfseries Locating the Source of Hallucination in LLaVA-1.5:}\\[4pt]
+{\large\bfseries A Three-Track Empirical Investigation of the ViT Visual Encoder}\\[12pt]
+Arihant Jha \quad Saurabh Rajesh Pandey \quad Yuvarraj Sriramkumar\\
+Nikhil Adyapak \quad Asish Das \quad Siddhartha Pathapati\\[4pt]
+University of Wisconsin--Madison\\
+CS 639: Introduction to Foundation Models, Spring 2026\\[4pt]
+\textit{Code and data:}
+\url{https://github.com/NikhilAdyapak/vit-hallucination-llava}\\[6pt]
+May 2026
+\end{center}
 
+% ---- abstract -----------------------------------------------
+\begin{abstract}
+Vision-language models (VLMs) hallucinate objects that are not present in the input image.
+Most prior work treats this as a decoder-side failure and leaves the visual encoder
+unexamined. We ask the opposite question: is the ViT encoder already producing
+degraded representations on images where LLaVA-1.5-7B later hallucinates? We test
+this through three controlled experiments on 500 COCO 2017 validation images.
+Track A (attention rollout entropy) finds no relationship between [CLS] attention spread
+and hallucination outcome ($\rho = 0.003$, $p = 0.94$, Cohen's $d = 0.039$).
+Track B (linear probes on patch embeddings at four ViT layers) finds the opposite:
+object discriminability is uniformly lower on hallucinating images at every probed layer
+($\Delta\mathrm{acc} \in [-0.039, -0.027]$, Wilcoxon $p < 0.005$ at all layers).
+Track C is reported in three configurations. Approach 1 uses 4-bit NF4 LLaVA-1.5-7B with
+hidden-state steering at LLM layers 14--15 and stratifies images by Track A entropy
+quartiles, finding directional VEGAS backfire on diffuse-attention images
+($\Delta\mathrm{CHAIR}_i = +0.021$, $P(\Delta \geq 0) = 0.929$). Approach 2 uses full
+fp16 LLaVA-1.5-7B and runs two complementary tests: a quality-stratified VEGAS
+falsification that returns zero effect because rollout-derived concentration is uniformly
+near zero, and a causal patch-ablation experiment at layer 18 (Track B's sweet spot)
+that finds top-K, bottom-K, and random ablations produce equivalent CHAIR changes. A
+patch-swap follow-up shows random-donor swaps significantly increase hallucination
+($p = 0.0028$) while matched-clean swaps have no effect ($p = 0.148$). Together the
+three tracks support a refined hypothesis: the ViT encoder fails on hallucinating
+images in feature content, not in attention geometry, and attention-based steering
+methods such as VEGAS have a structural blind spot in this failure mode.
+\end{abstract}
+
+% ============================================================
 \section{Introduction}
+% ============================================================
 
-VLMs such as LLaVA-1.5 routinely generate object descriptions that are not present in the image they are conditioned on. Standard benchmarks for hallucination, including POPE \cite{li2023pope} and CHAIR \cite{rohrbach2018chair}, evaluate the textual output and treat the visual encoder as a fixed, reliable upstream component. Methods designed to reduce hallucination, including VEGAS \cite{vegas}, build directly on this assumption: VEGAS injects ViT [CLS]-to-patch attention into LLM middle layers as a trusted spatial signal that tells the language model which visual tokens are worth attending to.
+VLMs such as LLaVA-1.5 routinely generate object descriptions that are not present in
+the image they are conditioned on. Standard benchmarks for hallucination, including
+POPE~\cite{li2023pope} and CHAIR~\cite{rohrbach2018chair}, evaluate the textual output
+and treat the visual encoder as a fixed, reliable upstream component. Methods designed
+to reduce hallucination, including VEGAS~\cite{seo2024vegas}, build directly on this
+assumption: VEGAS injects ViT [CLS]-to-patch attention into LLM middle layers as a
+trusted spatial signal that tells the language model which visual tokens are worth
+attending to.
 
-This project inverts the assumption. If the ViT is already producing degraded representations on the images that lead to hallucination, then any mitigation method that trusts ViT attention is operating on a signal that cannot distinguish good encodings from bad ones. We call this a structural blind spot: a failure mode that the method cannot detect by construction. The contribution of this paper is to look inside the ViT on the same 500-image sample that produces hallucinations and check whether the encoder is in fact failing on those images.
+This project inverts the assumption. If the ViT is already producing degraded
+representations on the images that lead to hallucination, then any mitigation method
+that trusts ViT attention is operating on a signal that cannot distinguish good
+encodings from bad ones. We call this a structural blind spot: a failure mode that the
+method cannot detect by construction. The contribution of this paper is to look inside
+the ViT on the same 500-image sample that produces hallucinations and check whether the
+encoder is in fact failing on those images.
 
-\paragraph{Hypothesis.} On images where LLaVA-1.5-7B produces a hallucinated object, the ViT encoder's representations, either its attention maps or its patch embeddings, are already measurably degraded relative to clean images, before any token is generated. The hypothesis decomposes into three falsifiable sub-claims, one per track:
-
-\begin{enumerate}[topsep=2pt,itemsep=2pt,leftmargin=22pt]
-\item \textbf{Track A.} Hallucinating images have more diffuse [CLS] attention, measured as higher rollout entropy.
-\item \textbf{Track B.} Hallucinating images have less object-discriminative patch embeddings, measured as lower linear-probe accuracy at intermediate ViT layers.
-\item \textbf{Track C.} An attention-based steering method (VEGAS) fails specifically on the images Track B identifies as feature-degraded, and a causal patch ablation at the layer Track B identifies as most discriminative produces measurable changes in hallucination rate.
+\textbf{Hypothesis.} On images where LLaVA-1.5-7B produces a hallucinated object, the
+ViT encoder's representations, either its attention maps or its patch embeddings, are
+already measurably degraded relative to clean images, before any token is generated.
+The hypothesis decomposes into three falsifiable sub-claims, one per track:
+\begin{enumerate}
+  \item \textbf{Track A.} Hallucinating images have more diffuse [CLS] attention,
+        measured as higher rollout entropy.
+  \item \textbf{Track B.} Hallucinating images have less object-discriminative patch
+        embeddings, measured as lower linear-probe accuracy at intermediate ViT layers.
+  \item \textbf{Track C.} An attention-based steering method (VEGAS) fails specifically
+        on the images Track B identifies as feature-degraded, and a causal patch
+        ablation at the layer Track B identifies as most discriminative produces
+        measurable changes in hallucination rate.
 \end{enumerate}
 
-The three tracks are designed so that the result is interpretable regardless of which sub-claims hold. A null on Track A combined with a positive on Track B would tell us that the encoder fails in feature content but not in attention geometry. A backfire on Track C would tell us that attention-based mitigation is unsafe in the failure regime. As we will show, the data lands close to this scenario.
+The three tracks are designed so that the result is interpretable regardless of which
+sub-claims hold. A null on Track A combined with a positive on Track B would tell us
+that the encoder fails in feature content but not in attention geometry. A backfire on
+Track C would tell us that attention-based mitigation is unsafe in the failure regime.
+As we will show, the data lands close to this scenario.
 
-\paragraph{Why this is a useful question.} Most published hallucination-mitigation methods (VEGAS \cite{vegas}, OPERA, VCD, VISTA) intervene at the decoder or inject signals back into the language model. They share an implicit assumption that the visual encoder is reliable. Seo et al.\ \cite{seo} found a correlation between ViT token uncertainty and hallucination using adversarial perturbations but did not test a mitigation method against the failure they identified. Our project tests that link end-to-end on a real VLM. Even a partial null is publishable: it relocates the encoder-failure signal from attention to features and identifies a class of methods that cannot see it.
+\textbf{Why this is a useful question.} Most published hallucination-mitigation methods
+(VEGAS~\cite{seo2024vegas}, OPERA, VCD, VISTA) intervene at the decoder or inject
+signals back into the language model. They share an implicit assumption that the visual
+encoder is reliable. Seo et al.~\cite{seo2025vit} found a correlation between ViT token
+uncertainty and hallucination using adversarial perturbations but did not test a
+mitigation method against the failure they identified. Our project tests that link
+end-to-end on a real VLM. Even a partial null is publishable: it relocates the
+encoder-failure signal from attention to features and identifies a class of methods that
+cannot see it.
 
+% ============================================================
 \section{Related Work}
+% ============================================================
 
-\paragraph{Hallucination in VLMs.} Object hallucination in image captioning was first characterized by CHAIR \cite{rohrbach2018chair}, which scores per-image hallucination as the fraction of mentioned object types absent from COCO ground truth. POPE \cite{li2023pope} probes binary object existence with yes/no questions on three adversarial splits (random, popular, adversarial). We use CHAIR$_i$ as the primary metric throughout because we want a continuous score per image, not a binary probe outcome.
+\textbf{Hallucination in VLMs.} Object hallucination in image captioning was first
+characterised by CHAIR~\cite{rohrbach2018chair}, which scores per-image hallucination
+as the fraction of mentioned object types absent from COCO ground truth.
+POPE~\cite{li2023pope} probes binary object existence with yes/no questions on three
+adversarial splits (random, popular, adversarial). We use $\mathrm{CHAIR}_i$ as the
+primary metric throughout because we want a continuous score per image, not a binary
+probe outcome.
 
-\paragraph{Attention rollout and ViT internals.} Abnar and Zuidema \cite{abnar2020rollout} proposed propagating attention across transformer layers by multiplying per-layer head-averaged attention matrices, giving end-to-end attention flow from any query token to all input tokens. We use rollout to obtain a 576-dimensional [CLS]-to-patch weight vector per image and study its entropy and spatial spread. Raghu et al.\ \cite{raghu2021vit} used linear probing to characterize where object information sits across ViT depth. We apply the same approach with hallucination outcome as the stratifier.
+\textbf{Attention rollout and ViT internals.} Abnar and Zuidema~\cite{abnar2020rollout}
+proposed propagating attention across transformer layers by multiplying per-layer
+head-averaged attention matrices, giving end-to-end attention flow from any query token
+to all input tokens. We use rollout to obtain a 576-dimensional [CLS]-to-patch weight
+vector per image and study its entropy and spatial spread.
+Raghu et al.~\cite{raghu2021vit} used linear probing to characterise where object
+information sits across ViT depth. We apply the same approach with hallucination
+outcome as the stratifier.
 
-\paragraph{VEGAS and attention-based steering.} Seo et al.\ proposed VEGAS \cite{vegas}, which injects ViT [CLS]-to-patch attention into LLM middle layers (typically layers 14--15 of Vicuna-7B) to bias generation toward visually salient patches. The intervention takes the form of a hidden-state rescaling at image-token positions, blended with uniform attention by a strength parameter $\lambda$. The method assumes ViT attention is a reliable steering signal across all input images. Our Track C tests this assumption empirically by stratifying its effect by encoder-quality groups defined either by attention entropy (Track A) or by linear-probe accuracy (Track B), and by directly ablating attention-ranked patches at Track B's most discriminative layer.
+\textbf{VEGAS and attention-based steering.} Seo et al.~\cite{seo2024vegas} proposed
+VEGAS, which injects ViT [CLS]-to-patch attention into LLM middle layers (typically
+layers 14--15 of Vicuna-7B) to bias generation toward visually salient patches. The
+intervention takes the form of a hidden-state rescaling at image-token positions,
+blended with uniform attention by a strength parameter $\lambda$. The method assumes
+ViT attention is a reliable steering signal across all input images. Our Track C tests
+this assumption empirically by stratifying its effect by encoder-quality groups defined
+either by attention entropy (Track A) or by linear-probe accuracy (Track B), and by
+directly ablating attention-ranked patches at Track B's most discriminative layer.
 
-\paragraph{LLaVA-1.5.} Liu et al.\ \cite{liu2023llava} introduced LLaVA-1.5, which connects a CLIP ViT-L/14@336 visual encoder to a Vicuna-7B language model through a two-layer MLP projector. The model expands the single \texttt{<image>} token in the prompt to 576 visual tokens after the projector. All Track A, B, and C runs use \texttt{llava-hf/llava-1.5-7b-hf}.
+\textbf{LLaVA-1.5.} Liu et al.~\cite{liu2023llava} introduced LLaVA-1.5, which
+connects a CLIP ViT-L/14@336 visual encoder to a Vicuna-7B language model through a
+two-layer MLP projector. The model expands the single \texttt{<image>} token in the
+prompt to 576 visual tokens after the projector. All Track A, B, and C runs use
+\texttt{llava-hf/llava-1.5-7b-hf}.
 
+% ============================================================
 \section{Shared Experimental Setup}
+% ============================================================
 
-\paragraph{Model.} \texttt{llava-hf/llava-1.5-7b-hf} loaded in float16 via \texttt{LlavaForConditionalGeneration} (\texttt{transformers} 4.37.2 for Tracks A and B; \texttt{transformers} $\geq$4.45 for Track C v2/v3). The visual encoder is CLIP ViT-L/14@336 with 24 layers, 16 heads, 1024-dim hidden, and $24 \times 24 = 576$ patch tokens. The language model is Vicuna-7B with 32 decoder layers and a 4096-dim hidden state.
+\textbf{Model.} \texttt{llava-hf/llava-1.5-7b-hf} loaded in float16 via
+\texttt{LlavaForConditionalGeneration} (transformers 4.37.2 for Tracks A and B;
+$\geq$4.45 for Track C v2/v3). The visual encoder is CLIP
+ViT-L/14@336~\cite{dosovitskiy2021vit} with 24 layers, 16 heads, 1024-dim hidden, and
+$24 \times 24 = 576$ patch tokens. The language model is Vicuna-7B with 32 decoder
+layers and a 4096-dim hidden state.
 
-\paragraph{Dataset.} 500 randomly sampled images from the COCO 2017 validation set, drawn with seed 639. The same image IDs are used across all three tracks; \texttt{sampled\_image\_ids.json} carries the order.
+\textbf{Dataset.} 500 randomly sampled images from the COCO 2017 validation set, drawn
+with seed 639. The same image IDs are used across all three tracks;
+\texttt{sampled\_image\_ids.json} carries the order.
 
-\paragraph{Hallucination ground truth.} CHAIR$_i$ scoring against COCO instance annotations. An image is labelled \emph{hallucinating} if CHAIR$_i > 0$, that is, the caption mentions at least one object type that is not present in the COCO ground truth for that image. Class balance on our sample: 329 hallucinating, 171 clean (hallucination rate $= 65.8\%$).
+\textbf{Hallucination ground truth.} $\mathrm{CHAIR}_i$ scoring against COCO instance
+annotations. An image is labelled \emph{hallucinating} if $\mathrm{CHAIR}_i > 0$,
+that is, the caption mentions at least one object type not present in the COCO ground
+truth for that image. Class balance on our sample: 329 hallucinating, 171 clean
+(hallucination rate $= 65.8\%$). Figure~\ref{fig:chair_dist} shows the distribution of
+$\mathrm{CHAIR}_i$ scores and the class balance.
 
-\paragraph{Compute.} Tracks A and B were run on Google Colab Pro with an A100 (40 GB). Track C Approach 1 was run on a Colab T4 (16 GB) with 4-bit NF4 quantization on the LLM weights (vision tower kept at fp16). Track C Approach 2 (both sub-experiments) was run on an RTX PRO 6000 Blackwell (102 GB) at full fp16, no quantization.
+\begin{figure}[!ht]
+  \centering
+  \includegraphics[width=\cw]{chair_distribution.png}
+  \caption{Left: distribution of $\mathrm{CHAIR}_i$ scores across the 500-image sample
+           (mean $= 0.319$, right-skewed with a spike at zero for clean images).
+           Right: class balance; 329 images (65.8\%) are flagged as hallucinating.}
+  \label{fig:chair_dist}
+\end{figure}
 
+\textbf{Compute.} Tracks A and B were run on Google Colab Pro with an A100 (40\,GB).
+Track C Approach 1 was run on a Colab T4 (16\,GB) with 4-bit NF4 quantization on the
+LLM weights (vision tower kept at fp16). Track C Approach 2 (parts A and B) was run on
+an RTX PRO 6000 Blackwell (102\,GB) at full fp16, no quantization.
+
+% ============================================================
 \section{Track A: ViT Attention Rollout Analysis}
+% ============================================================
 
 \subsection{Question}
 
-Does the ViT [CLS] attention concentrate on semantically relevant patches in clean images, and become diffuse or misfocused in hallucinating images?
+Does the ViT [CLS] attention concentrate on semantically relevant patches in clean
+images, and become diffuse or misfocused in hallucinating images?
 
 \subsection{Procedure}
 
-\begin{enumerate}[topsep=2pt,itemsep=2pt,leftmargin=22pt]
-\item For each of the 500 images, run a forward pass through the LLaVA ViT and capture per-layer attention tensors of shape $(H, 577, 577)$ for all 24 layers, where $H = 16$ heads.
-\item Compute attention rollout: head-average each layer to a $(577, 577)$ matrix, add the identity (residual skip), row-normalize, then take the matrix product across all 24 layers.
-\item Extract the [CLS] row of the rollout matrix, drop the [CLS] self-entry, and renormalize over the 576 patch positions. Compute the Shannon entropy of the resulting distribution in nats:
-$$H(\text{rollout}) = -\sum_{i=1}^{576} w_i \log w_i$$
-\item Compute spatial spread as the normalized variance of patch coordinates weighted by the rollout distribution.
-\item Stratify all measures by \texttt{is\_hallucinating} and split into entropy quartiles ($Q_1$ = most focused, $Q_4$ = most diffuse), 125 images per quartile.
+\begin{enumerate}
+  \item For each of the 500 images, run a forward pass through the LLaVA ViT and
+        capture per-layer attention tensors of shape $(H, 577, 577)$ for all 24 layers,
+        where $H = 16$ heads.
+  \item Compute attention rollout~\cite{abnar2020rollout}: head-average each layer to a
+        $(577, 577)$ matrix, add the identity (residual skip), row-normalise, then take
+        the matrix product across all 24 layers.
+  \item Extract the [CLS] row of the rollout matrix, drop the [CLS] self-entry, and
+        renormalise over the 576 patch positions. Compute the Shannon entropy of the
+        resulting distribution in nats:
+        \begin{equation}
+          H(\mathrm{rollout}) = -\sum_{i=1}^{576} w_i \log w_i
+        \end{equation}
+  \item Compute spatial spread as the normalised variance of patch coordinates weighted
+        by the rollout distribution.
+  \item Stratify all measures by \texttt{is\_hallucinating} and split into entropy
+        quartiles ($Q_1 =$ most focused, $Q_4 =$ most diffuse), 125 images per
+        quartile.
 \end{enumerate}
 
-The captioning prompt is \emph{``Describe everything you see in this image in detail, listing all objects, people, and animals visible.''} which yields long object-enumeration captions. Outputs (\texttt{chair\_labels.csv}, \texttt{entropy\_ranks.csv}, \texttt{rollout\_data\_complete.npz}, four diagnostic figures) are produced by three notebooks: inference + CHAIR scoring, attention rollout extraction, and entropy analysis + Track C handoff.
+The captioning prompt is \textit{``Describe everything you see in this image in detail,
+listing all objects, people, and animals visible.''} which yields long
+object-enumeration captions. Outputs are produced by three notebooks under
+\texttt{notebooks/track\_a/}: inference + CHAIR scoring, attention rollout extraction,
+and entropy analysis + Track C handoff.
 
 \subsection{Results}
 
-Mean CHAIR$_i$ across 500 images is $0.3186$ with 329/500 (65.8\%) flagged as hallucinating. No statistical test of the attention signal against the hallucination outcome reaches significance (Table~\ref{tab:trackA}). The quartile breakdown of hallucination rate is $61.6\% \to 68.8\% \to 68.8\% \to 64.0\%$ from most-focused to most-diffuse quartile. The trend is non-monotonic and the swing is only $2.4$ pp. Per-layer entropy curves show the largest hallucinating-vs-clean gap at layer 19 ($\Delta = 0.130$ nats) but this is small relative to within-group variance and runs in the opposite direction at layers 1 through 14.
+Mean $\mathrm{CHAIR}_i$ across 500 images is 0.3186 with 329/500 (65.8\%) flagged as
+hallucinating. No statistical test of the attention signal against the hallucination
+outcome reaches significance (Table~\ref{tab:tracka}). The quartile breakdown of
+hallucination rate is $61.6\% \to 68.8\% \to 68.8\% \to 64.0\%$ from most-focused to
+most-diffuse quartile. The trend is non-monotonic and the swing is only 2.4\,pp.
+Per-layer entropy curves show the largest hallucinating-vs-clean gap at layer 19
+($\Delta = 0.130$ nats) but this is small relative to within-group variance and runs in
+the opposite direction at layers 1 through 14.
 
-\begin{table}[h]
+\begin{table}[!ht]
 \centering
 \small
-\caption{Track A core statistics. Hallucinating images and clean images are statistically indistinguishable on every measure of [CLS] attention geometry we tested.}
-\label{tab:trackA}
-\renewcommand{\arraystretch}{1.1}
-\begin{tabular}{lcccc}
+\caption{Track A core statistics. Hallucinating images and clean images are
+         statistically indistinguishable on every measure of [CLS] attention geometry
+         we tested.}
+\label{tab:tracka}
+\begin{tabular}{lccc}
 \toprule
-\textbf{Test} & \textbf{Hallucinating} & \textbf{Clean} & \textbf{Statistic} & \textbf{Verdict} \\
- & ($n=329$) & ($n=171$) & & \\
+\textbf{Test} & \textbf{Hallucinating ($n=329$)} & \textbf{Clean ($n=171$)}
+              & \textbf{Statistic / Verdict} \\
 \midrule
-Mean rollout entropy (nats) & 6.3211 & 6.3207 & $d = 0.039$ & negligible \\
-Mean spatial spread & 0.4277 & 0.4252 & $\Delta = 0.0025$ & negligible \\
-Spearman(entropy, CHAIR$_i$) & --- & --- & $\rho = 0.003$, $p = 0.94$ & null \\
-Spearman(entropy, $\mathbbm{1}$[hall]) & --- & --- & $\rho = 0.013$, $p = 0.77$ & null \\
-Welch t-test (entropy) & --- & --- & $t = 0.402$, $p = 0.69$ & null \\
-Mann-Whitney U (entropy) & --- & --- & $U$ stat, $p = 0.39$ & null \\
+Mean rollout entropy (nats) & 6.3211 & 6.3207 & $d = 0.039$ / negligible \\
+Mean spatial spread         & 0.4277 & 0.4252 & $\Delta = 0.0025$ / negligible \\
+Spearman(entropy, $\mathrm{CHAIR}_i$) & --- & --- & $\rho = 0.003$, $p = 0.94$ / null \\
+Spearman(entropy, $\mathbf{1}[\mathrm{hall}]$) & --- & --- & $\rho = 0.013$, $p = 0.77$ / null \\
+Welch $t$-test (entropy)    & --- & --- & $t = 0.402$, $p = 0.69$ / null \\
+Mann-Whitney $U$ (entropy)  & --- & --- & $U$ stat, $p = 0.39$ / null \\
 \bottomrule
 \end{tabular}
 \end{table}
 
+\begin{figure}[!ht]
+  \centering
+  \includegraphics[width=\cw]{figure_entropy_distribution.png}
+  \caption{Track A: [CLS] rollout entropy distributions for hallucinating vs.\ clean
+           images (left) and Mann-Whitney group comparison (right). The two
+           distributions overlap almost completely ($d = 0.039$, $p = 0.39$).}
+  \label{fig:track_a_entropy}
+\end{figure}
+
+\begin{figure}[!ht]
+  \centering
+  \includegraphics[width=\cw]{figure_quartile_analysis.png}
+  \caption{Track A: hallucination rate (left) and mean $\mathrm{CHAIR}_i$ (right) by
+           attention-entropy quartile. Neither panel shows a monotonic trend, confirming
+           the null result.}
+  \label{fig:track_a_quartile}
+\end{figure}
+
+\begin{figure}[!ht]
+  \centering
+  \includegraphics[width=\cw]{figure_per_layer_entropy.png}
+  \caption{Per-layer [CLS] entropy for hallucinating vs.\ clean images across all 24
+           ViT layers. A gap appears at layers 16--24 and reaches its maximum at layer
+           19 ($\Delta = 0.130$ nats), but within-group variance is large and the gap
+           does not reach significance at the rollout-level.}
+  \label{fig:track_a_perlayer}
+\end{figure}
+
+\begin{figure}[!ht]
+  \centering
+  \includegraphics[width=\cw]{figure_spearman_scatter.png}
+  \caption{Spearman scatter of rollout entropy vs.\ $\mathrm{CHAIR}_i$ score
+           ($\rho = 0.003$, $p = 0.94$). There is no relationship between attention
+           diffuseness and hallucination severity.}
+  \label{fig:track_a_scatter}
+\end{figure}
+
 \subsection{Finding}
 
-ViT [CLS] attention rollout is statistically indistinguishable between hallucinating and clean images on this 500-image sample. Track A is a clean null. Two things follow.
+ViT [CLS] attention rollout is statistically indistinguishable between hallucinating and
+clean images on this 500-image sample. Track A is a clean null. Two consequences
+follow.
 
-\textbf{Rules out.} The simple version of our hypothesis where hallucination is driven by spatial misfocus, that is, where the ViT looks at the wrong region of the image and the LLM hallucinates as a consequence.
+First, the simple version of our hypothesis where hallucination is driven by spatial
+misfocus is ruled out. That is, the scenario where the ViT looks at the wrong region of
+the image and the LLM hallucinates as a consequence is not supported by the data.
 
-\textbf{Does not rule out.} An encoder failure that lives in patch features rather than in attention geometry. The information that distinguishes the two subsets may live in what the patches encode, not in which patches are attended to. Track B tests this directly.
+Second, an encoder failure that lives in patch features rather than in attention
+geometry remains possible. The information that distinguishes the two subsets may live
+in what the patches encode, not in which patches are attended to. Track B tests this
+directly.
 
+% ============================================================
 \section{Track B: Patch Representation Linear Probing}
+% ============================================================
 
 \subsection{Question}
 
-If attention geometry is uninformative, does the content of patch embeddings encode object identity less reliably on hallucinating images?
+If attention geometry is uninformative, does the content of patch embeddings encode
+object identity less reliably on hallucinating images?
 
 \subsection{Procedure}
 
-\begin{enumerate}[topsep=2pt,itemsep=2pt,leftmargin=22pt]
-\item For each of the 500 images, hook the ViT and capture hidden states at four probe layers $L \in \{6, 12, 18, 24\}$. We changed from the proposed $\{8, 16, 24\}$ to give uniform depth coverage of the 24-layer encoder.
-\item For each layer, store both the [CLS] vector (1024-d) and the mean-pooled patch embedding (1024-d) and cache to \texttt{patch\_embeddings\_cache.npz}.
-\item For each of the 80 COCO categories with at least 20 positive examples in our sample, train a binary $\ell_2$-regularized logistic regression probe (lbfgs solver) under 5-fold cross-validation, predicting object presence from the L2-normalized mean-pooled patch embedding. 17 categories survive: backpack, bed, bench, book, bottle, bowl, car, cell phone, chair, cup, dining table, handbag, laptop, person, sink, truck, umbrella.
-\item For each (layer, category) probe, compute three accuracies and three AUCs: overall, on the hallucinating subset only, and on the clean subset only.
-\item Per layer, test $\Delta\text{acc} = \text{acc}_{\text{hall}} - \text{acc}_{\text{clean}}$ across the 17 categories using the Wilcoxon signed-rank test.
+\begin{enumerate}
+  \item For each of the 500 images, hook the ViT and capture hidden states at four
+        probe layers $L \in \{6, 12, 18, 24\}$. We changed from the proposed
+        $\{8, 16, 24\}$ to give uniform depth coverage of the 24-layer encoder.
+  \item For each layer, store both the [CLS] vector (1024-d) and the mean-pooled patch
+        embedding (1024-d) and cache to \texttt{patch\_embeddings\_cache.npz}.
+  \item For each of the 80 COCO categories with at least 20 positive examples in our
+        sample, train a binary $\ell_2$-regularised logistic regression probe
+        (\texttt{lbfgs} solver) under 5-fold cross-validation, predicting object
+        presence from the L2-normalised mean-pooled patch embedding. 17 categories
+        survive: backpack, bed, bench, book, bottle, bowl, car, cell phone, chair, cup,
+        dining table, handbag, laptop, person, sink, truck, umbrella.
+  \item For each (layer, category) probe, compute three accuracies and three AUCs:
+        overall, on the hallucinating subset only, and on the clean subset only.
+  \item Per layer, test $\Delta\mathrm{acc} = \mathrm{acc}_{\mathrm{hall}} -
+        \mathrm{acc}_{\mathrm{clean}}$ across the 17 categories using the Wilcoxon
+        signed-rank test.
 \end{enumerate}
 
-A total of $4 \times 17 = 68$ probes were trained. The full pipeline is in \texttt{notebooks/track\_b/TrackB\_Linear\_Probing.ipynb} and produces \texttt{probe\_results.csv}, \texttt{probe\_stats.csv}, and four figures.
+A total of $4 \times 17 = 68$ probes were trained. The full pipeline is in
+\texttt{notebooks/track\_b/TrackB\_Linear\_Probing.ipynb} and produces
+\texttt{probe\_results.csv}, \texttt{probe\_stats.csv}, and four figures.
 
 \subsection{Results}
 
-Three observations stand out (Table~\ref{tab:trackB}). First, mean probe accuracy and AUC rise with depth and peak at layer 18 (acc $= 0.946$, AUC $= 0.905$), consistent with the standard finding that mid-late ViT layers carry the most object-discriminative information. Second, probes are uniformly worse on hallucinating images at every layer, with $\Delta\text{acc} < 0$ and $p < 0.005$ in all four cases. Third, the gap is smallest at layer 18 ($-0.027$) but never closes; the mean across layers is $-0.035$.
+Three observations stand out (Table~\ref{tab:trackb}). First, mean probe accuracy and
+AUC rise with depth and peak at layer 18 (acc $= 0.946$, AUC $= 0.905$), consistent
+with the standard finding that mid-late ViT layers carry the most object-discriminative
+information. Second, probe \emph{accuracy} is uniformly worse on hallucinating images
+at every layer, with $\Delta\mathrm{acc} < 0$ and $p < 0.005$ in all four cases.
+Third, the gap is smallest at layer 18 ($-0.027$) but never closes; the mean across
+layers is $-0.035$.
 
-\begin{table}[h]
+We note that ROC-AUC delta does not show the same uniform pattern as accuracy delta.
+At layers 12 and 18, mean AUC delta is slightly positive ($+0.011$ and $+0.008$,
+respectively), while it is negative at layers 6 and 24. This mixed pattern likely
+reflects the class-imbalance structure of the probe evaluation: the hallucinating subset
+is nearly twice as large as the clean subset (329 vs.\ 171), and AUC may be sensitive to
+the different within-subset category distributions at each layer. We therefore use
+accuracy delta as the primary quantity, since the Wilcoxon signed-rank test on accuracy
+is consistent and significant across all four layers and directly addresses the
+hypothesis.
+
+\begin{table}[!ht]
 \centering
 \small
-\caption{Track B linear probe accuracy across ViT depth, stratified by hallucination outcome. All four layers reach significance at $\alpha = 0.005$.}
-\label{tab:trackB}
-\renewcommand{\arraystretch}{1.1}
-\begin{tabular}{ccccccc}
+\caption{Track B linear probe accuracy across ViT depth, stratified by hallucination
+         outcome. All four layers reach significance at $\alpha = 0.005$.}
+\label{tab:trackb}
+\begin{tabular}{lcccccc}
 \toprule
-\textbf{Layer} & \textbf{Mean Acc} & \textbf{Mean AUC} & \textbf{Acc$_{\text{hall}}$} & \textbf{Acc$_{\text{clean}}$} & \textbf{$\Delta$Acc} & \textbf{Wilcoxon $p$} \\
+\textbf{Layer} & \textbf{Mean Acc} & \textbf{Mean AUC}
+               & $\mathbf{\mathrm{Acc}_{\mathrm{hall}}}$
+               & $\mathbf{\mathrm{Acc}_{\mathrm{clean}}}$
+               & $\mathbf{\Delta\mathrm{Acc}}$
+               & \textbf{Wilcoxon $p$} \\
 \midrule
 6  & 0.909 & 0.734 & 0.895 & 0.934 & $-0.039$ & $8.4 \times 10^{-4}$ \\
 12 & 0.933 & 0.833 & 0.920 & 0.956 & $-0.036$ & $6.6 \times 10^{-4}$ \\
 18 & 0.946 & 0.905 & 0.937 & 0.964 & $-0.027$ & $4.2 \times 10^{-3}$ \\
 24 & 0.939 & 0.875 & 0.926 & 0.964 & $-0.038$ & $1.5 \times 10^{-4}$ \\
 \midrule
-\multicolumn{5}{r}{\textbf{Mean $\Delta$Acc across all four layers:}} & \textbf{$-0.035$} & --- \\
+\multicolumn{5}{l}{\small Mean $\Delta\mathrm{Acc}$ across all four layers:}
+  & $-0.035$ & --- \\
 \bottomrule
 \end{tabular}
 \end{table}
+
+\begin{figure}[!ht]
+  \centering
+  \includegraphics[width=\cw]{figure_probe_accuracy_curves.png}
+  \caption{Track B probe performance across ViT depth. Left: overall accuracy and
+           ROC-AUC by layer, peaking at layer 18. Right: stratified accuracy for
+           hallucinating vs.\ clean images, showing a persistent gap at every layer.}
+  \label{fig:trackb_curves}
+\end{figure}
+
+\begin{figure}[!ht]
+  \centering
+  \includegraphics[width=\cw]{figure_probe_accuracy_delta.png}
+  \caption{Track B accuracy delta ($\mathrm{acc}_{\mathrm{hall}} -
+           \mathrm{acc}_{\mathrm{clean}}$) by layer. Left: mean delta with confidence
+           intervals, negative at every layer. Right: per-category distribution of
+           deltas, confirming the negative direction is consistent across all 17
+           categories.}
+  \label{fig:trackb_delta}
+\end{figure}
+
+\begin{figure}[!ht]
+  \centering
+  \includegraphics[width=\cw]{figure_probe_auc_heatmap.png}
+  \caption{ROC-AUC per (layer, category). Object-discriminative information increases
+           with depth and peaks around layer 18 for most categories. Small or
+           visually subtle objects (backpack, bench, cell phone) benefit most from
+           deeper layers.}
+  \label{fig:trackb_heatmap}
+\end{figure}
+
+\begin{figure}[!ht]
+  \centering
+  \includegraphics[width=\cw]{figure_probe_auc_delta.png}
+  \caption{ROC-AUC delta (hallucinating minus clean) by layer (left) and by category
+           (right). Unlike the accuracy delta, the AUC delta is mixed across layers
+           (positive at layers 12 and 18), consistent with the class-imbalance
+           sensitivity of AUC discussed in the text.}
+  \label{fig:trackb_auc}
+\end{figure}
 
 \subsection{Finding}
 
-Track B confirms an encoder-side signal of hallucination. Mean-pooled patch embeddings on hallucinating images are linearly less informative about object presence than those of clean images at every probed layer. The effect is significant ($p < 0.005$) at all four layers and largest at the input-near and output-near ends of the ViT, with mid-late layers (especially layer 18) partially compensating but not closing the gap.
+Track B confirms an encoder-side signal of hallucination. Mean-pooled patch embeddings
+on hallucinating images are linearly less informative about object presence than those
+of clean images at every probed layer. The effect is significant ($p < 0.005$) at all
+four layers and is largest at the input-near and output-near ends of the ViT, with
+mid-late layers (especially layer 18) partially compensating but not closing the gap.
 
-This is a correlational result. Hallucinating images may be intrinsically harder, with more objects, smaller objects, or rarer categories, and the probe gap may reflect difficulty rather than encoder failure. The Track C causal ablation in Section~\ref{sec:trackC_causal} addresses this directly.
+This is a correlational result. Hallucinating images may be intrinsically harder, with
+more objects, smaller objects, or rarer categories, and the probe gap may reflect
+difficulty rather than encoder failure. The Track C causal ablation in
+Section~\ref{sec:trackc_causal} addresses this directly.
 
 \subsection{What Tracks A and B Together Force}
 
-The combination of Track A null and Track B positive sharpens the hypothesis. Before the experiments we expected encoder failure to show up in two ways, attention and features. The data says it shows up in only one of them.
+The combination of Track A null and Track B positive sharpens the hypothesis. Before
+the experiments we expected encoder failure to show up in two ways, attention and
+features. The data says it shows up in only one.
 
-\begin{tcolorbox}[colback=gray!8,colframe=gray!50,boxrule=0.4pt,arc=2pt]
-\textbf{Refined hypothesis.} The ViT encoder fails on hallucinating images, but the failure is in feature content, not attention geometry. Patch embeddings on hallucinating images carry less linearly decodable object information at every probed layer. Spatial attention distributions look essentially identical to clean cases. Methods that trust ViT attention as a corrective signal cannot see this failure mode.
-\end{tcolorbox}
+\begin{framed}
+\noindent\textbf{Refined hypothesis.} The ViT encoder fails on hallucinating images, but
+the failure is in feature content, not attention geometry. Patch embeddings on
+hallucinating images carry less linearly decodable object information at every probed
+layer. Spatial attention distributions look essentially identical to clean cases.
+Methods that trust ViT attention as a corrective signal cannot see this failure mode.
+\end{framed}
 
-This refined hypothesis directly motivates Track C. The right way to test whether VEGAS, an attention-trusting method, has the predicted blind spot is to stratify its effect by Track B quality groups, not by Track A entropy. We report results for both stratifications below because we ran both, and we add a direct causal ablation that targets layer 18 specifically.
+This refined hypothesis directly motivates Track C. The right way to test whether
+VEGAS, an attention-trusting method, has the predicted blind spot is to stratify its
+effect by Track B quality groups, not by Track A entropy. We report results for both
+stratifications below because we ran both, and we add a direct causal patch ablation
+that targets layer 18 specifically.
 
+% ============================================================
 \section{Track C: VEGAS Falsification and Causal Ablation}
+% ============================================================
 
 \subsection{Question}
 
-Does an attention-based steering method (VEGAS) perform differently on encoder-clean versus encoder-degraded images? And does directly perturbing patches at Track B's most discriminative layer change hallucination outcomes? We address these questions through three implementations: an entropy-stratified VEGAS run at 4-bit (Approach 1), a quality-stratified VEGAS run at fp16 (Approach 2 part A), and a causal patch-ablation experiment at fp16 with a patch-swap follow-up (Approach 2 part B). We report all three because the comparison is itself informative.
+Does an attention-based steering method (VEGAS) perform differently on encoder-clean
+versus encoder-degraded images? And does directly perturbing patches at Track B's most
+discriminative layer change hallucination outcomes? We address these questions through
+three implementations: an entropy-stratified VEGAS run at 4-bit (Approach 1), a
+quality-stratified VEGAS run at fp16 (Approach 2 part A), and a causal patch-ablation
+experiment at fp16 with a patch-swap follow-up (Approach 2 part B). We report all three
+because the comparison is itself informative.
 
 \subsection{Background: the VEGAS Mechanism}
 
-VEGAS \cite{vegas} assumes ViT attention is a reliable spatial signal and uses it to steer LLM generation. During decoding, it identifies concentrated visual tokens (high attention weight) and amplifies their influence on LLM middle-layer hidden states, scaled by a visual concentration score $\alpha$:
-$$\alpha = 1 - \frac{H(\text{attention})}{\log N_{\text{patches}}}, \quad \alpha \in [0, 1]$$
-where $H(\cdot)$ is Shannon entropy and $N_{\text{patches}} = 576$. High $\alpha$ means the ViT's attention is concentrated; the method then steers more aggressively. Low $\alpha$ means diffuse attention; the method steers weakly. The hook target is LLM decoder layers around 14--15, where the published paper identifies peak conflict between visual and textual signals.
+VEGAS~\cite{seo2024vegas} assumes ViT attention is a reliable spatial signal and uses
+it to steer LLM generation. During decoding, it identifies concentrated visual tokens
+(high attention weight) and amplifies their influence on LLM middle-layer hidden states,
+scaled by a visual concentration score $\alpha$:
+\begin{equation}
+  \alpha = 1 - \frac{H(\mathrm{attention})}{\log N_{\mathrm{patches}}},
+  \quad \alpha \in [0, 1]
+\end{equation}
+where $H(\cdot)$ is Shannon entropy and $N_{\mathrm{patches}} = 576$. High $\alpha$
+means the ViT's attention is concentrated; the method then steers more aggressively.
+Low $\alpha$ means diffuse attention; the method steers weakly. The hook target is LLM
+decoder layers around 14--15, where the published paper identifies peak conflict between
+visual and textual signals.
 
 \subsection{Approach 1: 4-bit Quantized, Entropy-Stratified VEGAS}
 
-\subsubsection*{Procedure}
+\textbf{Procedure.} We loaded LLaVA-1.5-7B at 4-bit NF4 quantization via
+\texttt{bitsandbytes} on a Colab T4. The vision tower was kept at fp16 so the
+[CLS]-to-patch attention used for steering is numerically exact. We re-generated a
+vanilla baseline at the same 4-bit precision in the same notebook with the prompt
+\textit{``Describe this image.''} so the VEGAS-vs-baseline comparison is matched on
+quantization and prompt. The VEGAS hook is a forward pre-hook on LLM decoder layers 14
+and 15 that rescales the 576 visual token hidden states by a convex combination of
+uniform attention and the ViT final-layer [CLS]-to-patch attention with $\lambda = 0.5$,
+raised to $\lambda = 0.75$ when the normalised [CLS] attention has VABE $\geq 0.5$. The
+raw final-layer attention is sqrt-compressed and clipped to $[0.5, 2.0]$ around its
+mean to keep the intervention numerically safe.
 
-We loaded LLaVA-1.5-7B at 4-bit NF4 quantization via \texttt{bitsandbytes} on a Colab T4. The vision tower was kept at fp16 so the [CLS]-to-patch attention used for steering is numerically exact. We re-generated a vanilla baseline at the same 4-bit precision in the same notebook with the prompt \emph{``Describe this image.''} so the VEGAS-vs-baseline comparison is matched on quantization and prompt. The VEGAS hook is a forward pre-hook on LLM decoder layers 14 and 15 that rescales the 576 visual token hidden states by a convex combination of uniform attention and the ViT final-layer [CLS]-to-patch attention with $\lambda = 0.5$, raised to $\lambda = 0.75$ when the normalized [CLS] attention has VABE $\geq 0.5$. The raw final-layer attention is sqrt-compressed and clipped to $[0.5, 2.0]$ around its mean to keep the intervention numerically safe.
+We stratified images by Track A entropy quartiles ($Q_1 =$ most focused,
+$Q_4 =$ most diffuse), grouping $Q_1 + Q_2$ as ``clean attention'' (250 images) and
+$Q_3 + Q_4$ as ``degraded attention'' (250 images). Statistical testing used
+1000-iteration paired bootstrap to estimate confidence intervals on the per-stratum
+mean delta.
 
-We stratified images by Track A entropy quartiles ($Q_1$ = most focused, $Q_4$ = most diffuse), grouping $Q_1+Q_2$ as ``clean attention'' (250 images) and $Q_3+Q_4$ as ``degraded attention'' (250 images). Statistical testing used 1000-iteration paired bootstrap to estimate confidence intervals on the per-stratum mean delta.
+\textbf{Note on absolute CHAIR values.} Because Track A uses fp16 inference and
+Approach 1 uses 4-bit NF4 inference, the absolute $\mathrm{CHAIR}_i$ values are not
+directly comparable across tracks. The Track A vanilla baseline produces a mean
+$\mathrm{CHAIR}_i \approx 0.319$ and a 65.8\% hallucination rate; the 4-bit NF4
+re-generation in Approach 1 yields a vanilla mean $\mathrm{CHAIR}_i \approx 0.195$ and
+a 42.6\% hallucination rate. This gap of approximately 23 percentage points is
+attributable to quantization. The Approach 1 VEGAS comparison is internally matched
+(both branches use the same 4-bit weights), but absolute $\mathrm{CHAIR}_i$ values
+should not be compared to Tracks A and B.
 
-\subsubsection*{Results}
+\textbf{Results.} Table~\ref{tab:trackc_v1} reports per-stratum $\mathrm{CHAIR}_i$ for
+vanilla and VEGAS, the delta, the bootstrap 95\% CI, and the bootstrap probability that
+VEGAS hurts ($\Delta \geq 0$). Two patterns emerge.
 
-\begin{table}[h]
+\begin{table}[!ht]
 \centering
 \small
-\caption{Approach 1 (4-bit NF4, entropy-stratified). VEGAS minus vanilla, per stratum. Negative $\Delta$ means VEGAS reduces hallucination.}
-\label{tab:trackC1}
-\renewcommand{\arraystretch}{1.1}
-\begin{tabular}{lcccccc}
+\caption{Approach 1 (4-bit NF4, entropy-stratified). VEGAS minus vanilla, per
+         stratum. Negative $\Delta$ means VEGAS reduces hallucination.}
+\label{tab:trackc_v1}
+\begin{tabular}{lcccccr}
 \toprule
-\textbf{Stratum} & \textbf{$n$} & \textbf{Vanilla CHAIR$_i$} & \textbf{VEGAS CHAIR$_i$} & \textbf{$\Delta$} & \textbf{95\% CI} & \textbf{$P(\Delta \geq 0)$} \\
+\textbf{Stratum} & $n$ & \textbf{Vanilla $\mathrm{CHAIR}_i$}
+                 & \textbf{VEGAS $\mathrm{CHAIR}_i$}
+                 & $\Delta$ & \textbf{95\% CI} & $P(\Delta \geq 0)$ \\
 \midrule
-$Q_1$ (low entropy) & 125 & 0.174 & 0.156 & $-0.017$ & $[-0.054, +0.015]$ & 0.170 \\
-$Q_2$ (mid-low) & 125 & 0.183 & 0.184 & $+0.001$ & $[-0.033, +0.029]$ & 0.519 \\
-$Q_3$ (mid-high) & 125 & 0.227 & 0.244 & $+0.017$ & $[-0.022, +0.055]$ & 0.818 \\
-$Q_4$ (high entropy) & 125 & 0.196 & 0.221 & $+0.025$ & $[-0.010, +0.060]$ & 0.899 \\
+$Q_1$ (low entropy)  & 125 & 0.174 & 0.156 & $-0.017$ & $[-0.054,+0.015]$ & 0.170 \\
+$Q_2$ (mid-low)      & 125 & 0.183 & 0.184 & $+0.001$ & $[-0.033,+0.029]$ & 0.519 \\
+$Q_3$ (mid-high)     & 125 & 0.227 & 0.244 & $+0.017$ & $[-0.022,+0.055]$ & 0.818 \\
+$Q_4$ (high entropy) & 125 & 0.196 & 0.221 & $+0.025$ & $[-0.010,+0.060]$ & 0.899 \\
 \midrule
-Binary clean ($Q_1+Q_2$) & 250 & 0.179 & 0.170 & $-0.008$ & $[-0.033, +0.015]$ & 0.266 \\
-\textbf{Binary degraded ($Q_3+Q_4$)} & 250 & 0.211 & 0.232 & $+0.021$ & $[-0.009, +0.045]$ & \textbf{0.929} \\
-All & 500 & 0.195 & 0.201 & $+0.006$ & $[-0.012, +0.024]$ & 0.760 \\
+Binary clean ($Q_1+Q_2$)          & 250 & 0.179 & 0.170 & $-0.008$
+  & $[-0.033,+0.015]$ & 0.266 \\
+\textbf{Binary degraded ($Q_3+Q_4$)} & \textbf{250} & \textbf{0.211}
+  & \textbf{0.232} & $\mathbf{+0.021}$ & $\mathbf{[-0.009,+0.045]}$
+  & \textbf{0.929} \\
+All & 500 & 0.195 & 0.201 & $+0.006$ & $[-0.012,+0.024]$ & 0.760 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The per-quartile delta moves monotonically from $-0.017$ at $Q_1$ to $+0.025$ at $Q_4$. VEGAS helps slightly on the most focused images and hurts progressively as attention becomes more diffuse. The binary split makes the pattern crisp: $\Delta = -0.008$ on the clean half ($-1.6$ pp hallucination rate) and $\Delta = +0.021$ on the degraded half ($+4.4$ pp). The bootstrap puts $P(\Delta \geq 0) = 0.929$ on the degraded half, directional evidence of VEGAS backfire. The 95\% CI does include zero ($[-0.009, +0.045]$), so this is directional rather than definitive at $\alpha = 0.05$. Averaged across all 500 images, the two effects roughly cancel ($\Delta = +0.006$, $P = 0.760$).
+First, the per-quartile delta moves monotonically from $-0.017$ at $Q_1$ to $+0.025$
+at $Q_4$. VEGAS helps slightly on the most focused images and hurts progressively as
+attention becomes more diffuse. Second, the binary split makes the pattern crisp:
+$\Delta = -0.008$ on the clean half ($-1.6$\,pp hallucination rate) and $\Delta =
++0.021$ on the degraded half ($+4.4$\,pp). The bootstrap puts $P(\Delta \geq 0) =
+0.929$ on the degraded half, directional evidence of VEGAS backfire. The 95\% CI does
+include zero ($[-0.009, +0.045]$), so this is directional rather than definitive at
+$\alpha = 0.05$. Averaged across all 500 images, the two effects roughly cancel
+($\Delta = +0.006$, $P = 0.760$), which would make VEGAS appear neutral overall. The
+per-stratum breakdown is what reveals the actual signal.
+
+\begin{figure}[!ht]
+  \centering
+  \includegraphics[width=\cw]{stratified_trackC.png}
+  \caption{Approach 1: mean $\mathrm{CHAIR}_i$ (top) and hallucination rate (bottom)
+           per attention-entropy quartile, vanilla LLaVA vs.\ VEGAS. VEGAS bars rise
+           above the vanilla bars in $Q_3$ and $Q_4$, indicating backfire on
+           diffuse-attention images.}
+  \label{fig:trackc_v1_bars}
+\end{figure}
+
+\begin{figure}[!ht]
+  \centering
+  \includegraphics[width=\cw]{track_2.png}
+  \caption{Approach 1: per-image scatter of $\Delta\mathrm{CHAIR}_i$ (VEGAS minus
+           vanilla) against entropy quartile, with quartile mean lines. The trend
+           toward backfire on diffuse-attention images is visible at the per-image
+           level.}
+  \label{fig:trackc_v1_scatter}
+\end{figure}
+
+\begin{figure}[!ht]
+  \centering
+  \includegraphics[width=\cw]{chair_trackc.png}
+  \caption{Approach 1: paired bootstrap 95\% confidence intervals on
+           $\Delta$ mean $\mathrm{CHAIR}_i$ (VEGAS minus vanilla) per stratum.
+           Intervals strictly below zero indicate VEGAS reliably reduces hallucination;
+           intervals above zero indicate backfire.}
+  \label{fig:trackc_v1_bootstrap}
+\end{figure}
 
 \subsection{Approach 2 (Part A): fp16 Full Model, Quality-Group Stratified VEGAS}
 
-\subsubsection*{Procedure}
+\textbf{Procedure.} We re-ran VEGAS at full fp16 precision on an RTX PRO 6000
+Blackwell (102\,GB VRAM), removing quantization entirely. The prompt was
+\textit{``Describe everything you see in this image in one sentence.''} We computed a
+per-image concentration score from the pre-computed 24-layer ViT rollout:
+\begin{equation}
+  \alpha = 1 - \frac{H(\mathrm{rollout})}{\log 576}, \quad \alpha \in [0, 1]
+\end{equation}
+The VEGAS hook fires when $\alpha > 0.01$. When it fires, it identifies the top-20\%
+rollout patches and amplifies their hidden-state contribution at LLM layers 13 to 18
+by a factor of $(1 + \alpha)$.
 
-We re-ran VEGAS at full fp16 precision on an RTX PRO 6000 Blackwell with 102 GB VRAM, removing quantization entirely. The prompt was \emph{``Describe everything you see in this image in one sentence.''} We computed a per-image concentration score from the pre-computed 24-layer ViT rollout:
-$$\alpha = 1 - \frac{H(\text{rollout})}{\log 576}, \quad \alpha \in [0, 1]$$
-The VEGAS hook fires when $\alpha > 0.01$. When it fires, it identifies the top-20\% rollout patches and amplifies their hidden-state contribution at LLM layers 13 to 18 by a factor of $(1 + \alpha)$.
+Stratification was by Track B quality group: high-quality (171 images, those classified
+as clean by Track A's CHAIR labels, mean layer-18 probe accuracy 0.964) versus
+low-quality (329 images, those classified as hallucinating, mean layer-18 probe accuracy
+0.937). This is the stratification that the refined hypothesis from Tracks A+B actually
+predicts: VEGAS should fail on the encoder-degraded group, not just the diffuse-attention
+group.
 
-Stratification was by Track B quality group: high-quality (171 images, those classified as clean by Track A's CHAIR labels, mean layer-18 probe accuracy $0.964$) versus low-quality (329 images, those classified as hallucinating, mean layer-18 probe accuracy $0.937$). This is the stratification the refined hypothesis from Tracks A+B actually predicts: VEGAS should fail on the encoder-degraded group, not just the diffuse-attention group.
+\textbf{Results.} VEGAS produced \emph{zero} change in $\mathrm{CHAIR}_i$ on every
+single image (Table~\ref{tab:trackc_v2}). $\alpha$ values were in $[0.002, 0.010]$ with
+mean $\approx 0.005$ across all 500 images. This is consistent with Track A: rollout
+entropy is near maximum ($\bar{H} \approx 6.32$ nats vs.\ $\log 576 \approx 6.36$
+nats), which makes $\alpha$ near zero by construction. With $\alpha \approx 0.005$,
+the steering scale $(1 + \alpha) \approx 1.005$ is too small to change which token
+wins the argmax under greedy decoding. Mann-Whitney $U$ comparing $\Delta
+\mathrm{CHAIR}_i$ between groups gives $p = 1.000$. Spearman $\rho$ between $\alpha$
+and $\Delta\mathrm{CHAIR}_i$ is undefined because $\Delta\mathrm{CHAIR}_i$ is a
+constant zero vector.
 
-\subsubsection*{Results}
-
-VEGAS produced \emph{zero} change in CHAIR$_i$ on every single image (Table~\ref{tab:trackC2}). $\alpha$ values were in $[0.002, 0.010]$ with mean $\approx 0.005$ across all 500 images. This is consistent with Track A: rollout entropy is near maximum ($\bar H \approx 6.32$ nats vs.\ $\log 576 \approx 6.36$ nats), which makes $\alpha$ near zero by construction. With $\alpha \approx 0.005$, the steering scale $(1 + \alpha) \approx 1.005$ is too small to change which token wins the argmax under greedy decoding. Wilcoxon detects no change. Mann-Whitney $U$ comparing $\Delta$CHAIR$_i$ between groups gives $p = 1.000$. Spearman $\rho$ between $\alpha$ and $\Delta$CHAIR$_i$ is undefined because $\Delta$CHAIR$_i$ is a constant zero vector.
-
-\begin{table}[h]
+\begin{table}[!ht]
 \centering
 \small
-\caption{Approach 2 part A (fp16, Track B quality-group stratified VEGAS). VEGAS minus baseline.}
-\label{tab:trackC2}
-\renewcommand{\arraystretch}{1.1}
+\caption{Approach 2 part A (fp16, Track B quality-group stratified). VEGAS minus
+         baseline.}
+\label{tab:trackc_v2}
 \begin{tabular}{lcccc}
 \toprule
-\textbf{Group} & \textbf{$n$} & \textbf{$\Delta$ Hall.\ rate} & \textbf{$\Delta$ CHAIR$_i$} & \textbf{Mann-Whitney $p$} \\
+\textbf{Group} & $n$ & $\Delta$ Hall.\ rate & $\Delta\mathrm{CHAIR}_i$
+               & \textbf{Mann-Whitney $p$} \\
 \midrule
-All images & 500 & $+0.000$ & $+0.0000$ & --- \\
-High-quality (clean) & 171 & $+0.000$ & $+0.0000$ & --- \\
+All images                  & 500 & $+0.000$ & $+0.0000$ & --- \\
+High-quality (clean)        & 171 & $+0.000$ & $+0.0000$ & --- \\
 Low-quality (hallucinating) & 329 & $+0.000$ & $+0.0000$ & --- \\
-High vs.\ Low ($\Delta$CHAIR$_i$) & --- & --- & --- & 1.000 \\
+High vs.\ Low ($\Delta\mathrm{CHAIR}_i$) & --- & --- & --- & 1.000 \\
 \bottomrule
 \end{tabular}
 \end{table}
+
+\begin{figure}[!ht]
+  \centering
+  \includegraphics[width=\cw]{figure_vegas_falsification.png}
+  \caption{Approach 2 part A: hallucination rate and $\Delta\mathrm{CHAIR}_i$ by
+           quality group. Baseline and VEGAS bars are identical; all per-image
+           $\Delta\mathrm{CHAIR}_i$ values are exactly zero.}
+  \label{fig:trackc_v2_bars}
+\end{figure}
+
+\begin{figure}[!ht]
+  \centering
+  \includegraphics[width=\cw]{figure_vegas_alpha_vs_delta.png}
+  \caption{Approach 2 part A: VEGAS concentration score $\alpha$ versus
+           $\Delta\mathrm{CHAIR}_i$, stratified by quality group. All points fall on
+           the zero line because the rollout-derived $\alpha \approx 0.005$ for every
+           image, keeping the steering factor $(1+\alpha) \approx 1.005$ below the
+           threshold needed to change any greedy-decoded token.}
+  \label{fig:trackc_v2_alpha}
+\end{figure}
 
 \subsection{Approach 2 (Part B): Causal Patch Ablation and Patch Swap}
-\label{sec:trackC_causal}
+\label{sec:trackc_causal}
 
-\subsubsection*{Motivation}
+\textbf{Motivation.} The two VEGAS configurations above test the falsification
+hypothesis through an attention-based intervention. They leave open whether direct
+patch-level perturbations at Track B's most discriminative layer (layer 18) change
+hallucination outcomes. We run two experiments at fp16 to test this.
 
-The two VEGAS configurations above test the falsification hypothesis through an attention-based intervention. They leave open whether direct patch-level perturbations at Track B's most discriminative layer (layer 18) change hallucination outcomes. We run two experiments at fp16 to test this.
+\textbf{Experiment 1 (Patch Ablation).} We ran 50 images (25 hallucinating + 25 clean,
+sampled from the 500-image pool) through four conditions per image: (i) baseline (no
+intervention), (ii) zero-ablate the top-$K = 58$ rollout patches at layer 18, (iii)
+zero-ablate the bottom-$K = 58$ rollout patches at layer 18, (iv) zero-ablate $K = 58$
+random patches. The intervention is a forward hook on ViT encoder layer 17 (0-indexed,
+equal to layer 18 in 1-indexed convention used by Track B). $K = 58$ is 10\% of the 576
+patch tokens.
 
-\subsubsection*{Procedure: Experiment 1 (Patch Ablation)}
+\textbf{Experiment 2 (Patch Swap).} We constructed 50 hallucinating-clean image pairs
+by matching each hallucinating image to a clean image with at least one shared COCO
+ground-truth category (top 50 by overlap; range 3--7 shared categories). For each pair
+we ran three conditions: (i) baseline, (ii) clean-image-patch swap (replace the top-$K
+= 58$ rollout patches in the hallucinating image with the corresponding patches from
+its matched clean image at layer 18), (iii) random-donor swap (same operation but with
+patches from a randomly drawn clean donor with no required overlap). We tested CHAIR
+change vs.\ baseline (Wilcoxon signed-rank) and hallucination-status flip (McNemar).
 
-We ran 50 images (25 hallucinating + 25 clean, sampled from the 500-image pool) through four conditions per image: (i) baseline (no intervention), (ii) zero-ablate the top-K = 58 rollout patches at layer 18, (iii) zero-ablate the bottom-K = 58 rollout patches at layer 18, (iv) zero-ablate K = 58 random patches. For each condition we computed CHAIR$_i$ on the resulting caption and tested CHAIR change vs.\ baseline using the Wilcoxon signed-rank test. The intervention is a forward hook on ViT encoder layer 17 (0-indexed, equal to layer 18 in 1-indexed convention used by Track B) that zeros the selected patch positions before forwarding. K = 58 is chosen as 10\% of the 576 patch tokens.
+\textbf{Results.} Table~\ref{tab:trackc_causal} reports the outcomes.
 
-\subsubsection*{Procedure: Experiment 2 (Patch Swap)}
-
-We constructed 50 hallucinating-clean image pairs by matching each hallucinating image to a clean image with at least one shared COCO ground-truth category (top 50 by overlap; range 3--7 shared categories). For each pair we ran three conditions: (i) baseline, (ii) clean-image-patch swap (replace the top-K = 58 rollout patches in the hallucinating image with the corresponding patches from its matched clean image at layer 18), (iii) random-donor swap (same operation but with patches from a randomly drawn clean donor with no required overlap). We tested CHAIR change vs.\ baseline (Wilcoxon) and hallucination-status flip (McNemar) for each swap type.
-
-\subsubsection*{Results}
-
-\begin{table}[h]
+\begin{table}[!ht]
 \centering
 \small
-\caption{Approach 2 part B causal ablation results. Wilcoxon signed-rank vs baseline (paired, two-sided) for CHAIR change. McNemar tests hallucination-status flip for the matched-clean swap.}
-\label{tab:trackC_causal}
-\renewcommand{\arraystretch}{1.1}
+\caption{Approach 2 part B causal ablation results. Wilcoxon signed-rank vs.\ baseline
+         (paired, two-sided) for CHAIR change. McNemar tests hallucination-status flip
+         for the matched-clean swap.}
+\label{tab:trackc_causal}
 \begin{tabular}{llccc}
 \toprule
-\textbf{Experiment} & \textbf{Condition} & \textbf{Mean $\Delta$CHAIR$_i$} & \textbf{Statistic} & \textbf{$p$} \\
+\textbf{Experiment} & \textbf{Condition} & \textbf{Mean $\Delta\mathrm{CHAIR}_i$}
+                    & \textbf{Statistic} & \textbf{$p$} \\
 \midrule
-Exp 1 ($n=50$) & Top-K zero (rollout) & $-0.0067$ & $W = 20$ & 0.809 \\
-Exp 1 ($n=50$) & Bottom-K zero (rollout) & $+0.0550$ & $W = 8$ & 0.159 \\
-Exp 1 ($n=50$) & Random-K zero & $+0.0377$ & $W = 11$ & 0.326 \\
+Exp 1 ($n=50$)       & Top-K zero (rollout)        & $-0.0067$ & $W = 20$ & 0.809 \\
+Exp 1 ($n=50$)       & Bottom-K zero (rollout)     & $+0.0550$ & $W = 8$  & 0.159 \\
+Exp 1 ($n=50$)       & Random-K zero               & $+0.0377$ & $W = 11$ & 0.326 \\
 \midrule
-Exp 2 ($n=50$ pairs) & Matched-clean swap & $+0.0461$ & $W = 46$ & 0.148 \\
-Exp 2 ($n=50$ pairs) & \textbf{Random-donor swap} & $\mathbf{+0.1132}$ & $W = 34$ & $\mathbf{0.0028}$ \\
-Exp 2 (status flip) & Clean swap (McNemar) & hall$\to$clean = 3, clean$\to$hall = 5 & --- & 0.727 \\
+Exp 2 ($n=50$ pairs) & Matched-clean swap          & $+0.0461$ & $W = 46$ & 0.148 \\
+\textbf{Exp 2 ($n=50$ pairs)} & \textbf{Random-donor swap} & $\mathbf{+0.1132}$
+                                & $\mathbf{W = 34}$ & $\mathbf{0.0028}$ \\
+Exp 2 (status flip)  & Clean swap (McNemar)
+                     & hall$\to$clean = 3, clean$\to$hall = 5 & --- & 0.727 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\textbf{Experiment 1.} Top-K, bottom-K, and random-K ablations are statistically equivalent. None reaches significance individually, and the three signed effects span a $\sim 6$ pp band that is consistent with random fluctuation. Crucially, top-K (rollout-ranked high-attention patches) does not produce a larger CHAIR change than random-K, which is the prediction Track A's null already implied: rollout attention does not pick out causally important patches. This is the first direct \emph{causal} confirmation of the Track A null. The fact that all three perturbations produce small but positive deltas (only top-K is negative, by a tiny margin) is consistent with disrupting any 10\% of the patch grid causing a slight degradation, not with attention-rank carrying causal information.
+\textbf{Experiment 1.} Top-$K$, bottom-$K$, and random-$K$ ablations are statistically
+equivalent. None reaches significance individually, and the three signed effects span a
+$\sim 6$\,pp band that is consistent with random fluctuation. Crucially, top-$K$
+(rollout-ranked high-attention patches) does not produce a larger CHAIR change than
+random-$K$, which is the prediction Track A's null already implied: rollout attention
+does not pick out causally important patches. This is the first direct \emph{causal}
+confirmation of the Track A null. The fact that all three perturbations produce small
+but positive deltas (only top-$K$ is negative, by a tiny margin) is consistent with
+disrupting any 10\% of the patch grid causing a slight degradation, not with
+attention-rank carrying causal information.
 
-\textbf{Experiment 2.} The two swap conditions diverge cleanly. Matched-clean swap (importing patches from a semantically similar clean image into a hallucinating image at layer 18) does not significantly change CHAIR$_i$ ($p = 0.148$), and McNemar shows no significant change in hallucination status ($p = 0.727$). Random-donor swap (importing patches from an unrelated clean donor) significantly \emph{increases} hallucination ($\Delta = +0.113$, $p = 0.0028$). The asymmetry tells two things at once. First, the patch content does carry causally relevant information: random unrelated content makes things worse, while matched content does not. Second, the simple matched-clean swap is not enough to reduce hallucination on its own, which means Track B's correlation between low probe accuracy and hallucination is not trivially fixable by transplanting patch content from a clean image. Either the hallucination depends on patch content interactions across the whole image (and isolated patch swaps cannot fix that) or the matched clean image was not a tight enough match for the failure mode.
+\textbf{Experiment 2.} The two swap conditions diverge cleanly. Matched-clean swap
+(importing patches from a semantically similar clean image into a hallucinating image
+at layer 18) does not significantly change $\mathrm{CHAIR}_i$ ($p = 0.148$), and
+McNemar shows no significant change in hallucination status ($p = 0.727$). Random-donor
+swap (importing patches from an unrelated clean donor) significantly \emph{increases}
+hallucination ($\Delta = +0.113$, $p = 0.0028$). The asymmetry tells two things at once.
+First, the patch content does carry causally relevant information: random unrelated
+content makes things worse, while matched content does not. Second, the simple
+matched-clean swap is not enough to reduce hallucination on its own, which means
+Track B's correlation between low probe accuracy and hallucination is not trivially
+fixable by transplanting patch content from a clean image. Either the hallucination
+depends on patch content interactions across the whole image (and isolated patch swaps
+cannot fix that) or the matched clean image was not a tight enough match for the
+failure mode.
 
 \subsection{Why the Three Approaches Tell Compatible Stories}
 
-Approach 1 (4-bit, entropy-stratified VEGAS) shows that an attention-based intervention with a meaningful steering magnitude (raw final-layer attention, $\lambda = 0.5$) backfires directionally on diffuse-attention images ($P = 0.929$). Approach 2 part A (fp16, quality-stratified VEGAS) shows that when the steering signal is the rollout-derived $\alpha$, the intervention never activates because $\alpha$ collapses to $\sim 0.005$ for every image (a direct consequence of Track A's near-uniform rollout finding). Approach 2 part B (fp16, causal ablation) shows that even when we bypass VEGAS entirely and directly zero attention-ranked patches at layer 18, top-K, bottom-K, and random ablations are statistically equivalent: rollout attention does not pick out causally important patches. The three approaches converge on the same point from three different angles: ViT attention is not a reliable signal for selectively correcting hallucination in LLaVA-1.5-7B.
+Approach 1 (4-bit, entropy-stratified VEGAS) shows that an attention-based intervention
+with a meaningful steering magnitude (raw final-layer attention, $\lambda = 0.5$)
+backfires directionally on diffuse-attention images ($P = 0.929$). Approach 2 part A
+(fp16, quality-stratified VEGAS) shows that when the steering signal is the
+rollout-derived $\alpha$, the intervention never activates because $\alpha$ collapses to
+$\sim 0.005$ for every image (a direct consequence of Track A's near-uniform rollout
+finding). Approach 2 part B (fp16, causal ablation) shows that even when we bypass
+VEGAS entirely and directly zero attention-ranked patches at layer 18, top-$K$,
+bottom-$K$, and random ablations are statistically equivalent: rollout attention does
+not pick out causally important patches. The three approaches converge on the same
+point from three different angles: ViT attention is not a reliable signal for
+selectively correcting hallucination in LLaVA-1.5-7B.
 
+% ============================================================
 \section{Discussion}
+% ============================================================
 
 \subsection{What the Three Tracks Together Show}
 
-\textbf{Refined hypothesis.} Tracks A, B, and C together support a sharper version of the original hypothesis. The ViT encoder contributes measurably to LLaVA-1.5-7B hallucination, but the failure is in feature content (Track B), not in attention geometry (Track A). Patch embeddings on hallucinating images carry less linearly decodable object information at every probed layer, while spatial attention distributions look essentially identical to clean cases. Attention-based steering methods that trust ViT attention as a corrective signal cannot address this failure mode because their corrective signal is computed from the very attention quantity Track A showed to be uninformative, and a direct causal ablation at Track B's best layer confirms attention rank is not causally informative.
+\textbf{Refined hypothesis.} Tracks A, B, and C together support a sharper version of
+the original hypothesis. The ViT encoder contributes measurably to LLaVA-1.5-7B
+hallucination, but the failure is in feature content (Track B), not in attention
+geometry (Track A). Patch embeddings on hallucinating images carry less linearly
+decodable object information at every probed layer, while spatial attention distributions
+look essentially identical to clean cases. Attention-based steering methods that trust
+ViT attention as a corrective signal cannot address this failure mode because their
+corrective signal is computed from the very attention quantity Track A showed to be
+uninformative, and a direct causal ablation at Track B's best layer confirms attention
+rank is not causally informative.
 
-\textbf{The Track C structural blind spot.} VEGAS's core assumption is that ViT attention concentration identifies trustworthy visual tokens. Our three-approach Track C investigation challenges this assumption on three levels. Approach 1 shows that a strong attention-based intervention backfires on diffuse-attention images. Approach 2A shows that the rollout-based concentration score $\alpha$ cannot drive steering at all because rollout collapses to near-uniform. Approach 2B confirms causally that attention-ranked patches do not carry causally privileged information at layer 18. The patch-swap follow-up adds a second causal observation: random patches significantly worsen hallucination, but matched-clean patches do not significantly help, which means Track B's correlation is real but not trivially reversible by simple transplant.
+\textbf{The Track C structural blind spot.} VEGAS's core assumption is that ViT
+attention concentration identifies trustworthy visual tokens. Our three-approach Track
+C investigation challenges this assumption on three levels. Approach 1 shows that a
+strong attention-based intervention backfires on diffuse-attention images. Approach 2A
+shows that the rollout-based concentration score $\alpha$ cannot drive steering at all
+because rollout collapses to near-uniform. Approach 2B confirms causally that
+attention-ranked patches do not carry causally privileged information at layer 18. The
+patch-swap follow-up adds a second causal observation: random patches significantly
+worsen hallucination, but matched-clean patches do not significantly help, which means
+Track B's correlation is real but not trivially reversible by simple transplant.
 
-\subsection{Per-Track Contribution}
+\subsection{What Each Track Contributes}
 
-\begin{table}[h]
+Table~\ref{tab:contributions} summarises the contribution of each track to the overall
+conclusion.
+
+\begin{table}[!ht]
 \centering
 \small
 \caption{Summary of contributions across the three tracks.}
-\label{tab:contrib}
-\renewcommand{\arraystretch}{1.15}
-\begin{tabular}{>{\bfseries}p{2.6cm} p{4.4cm} p{4.0cm} p{3.5cm}}
+\label{tab:contributions}
+\begin{tabular}{p{2.1cm}p{3.3cm}p{3.3cm}p{3.3cm}}
 \toprule
 \textbf{Track} & \textbf{Question} & \textbf{Key result} & \textbf{Implication} \\
 \midrule
-A: Attention rollout & Is hallucination predicted by diffuse ViT attention? & $\rho = 0.003$, $p = 0.94$, $d = 0.039$. Complete null. & Rules out attention misfocus as the failure mode. \\
-\addlinespace[2pt]
-B: Linear probing & Is hallucination predicted by degraded patch features? & $\Delta\text{acc} \in [-0.039, -0.027]$, $p < 0.005$ at all 4 layers. & Feature degradation is real; the encoder is a measurable contributor. \\
-\addlinespace[2pt]
-C: VEGAS Approach 1 & Does VEGAS fail on diffuse-attention images? & $\Delta = +0.021$ on degraded half, $P(\Delta \geq 0) = 0.929$. Directional backfire. & Attention-based steering is unreliable in the diffuse regime. \\
-\addlinespace[2pt]
-C: VEGAS Approach 2A & Does VEGAS fail on feature-degraded images? & $\Delta = 0.0000$ all groups; $\alpha \approx 0$ for all images. & Rollout-derived $\alpha$ cannot drive steering. \\
-\addlinespace[2pt]
-C: Causal Approach 2B & Are attention-ranked patches causally privileged? & Top-K $\approx$ Bottom-K $\approx$ Random; clean swap n.s., random-donor swap $p = 0.0028$. & Attention rank is causally inert; patch content matters but is not trivially swappable. \\
+\textbf{A: Attention rollout}
+  & Is hallucination predicted by diffuse ViT attention?
+  & $\rho = 0.003$, $p = 0.94$, $d = 0.039$. Complete null.
+  & Rules out attention misfocus as the failure mode. \\[4pt]
+\textbf{B: Linear probing}
+  & Is hallucination predicted by degraded patch features?
+  & $\Delta\mathrm{acc} \in [-0.039, -0.027]$, $p < 0.005$ at all 4 layers.
+  & Feature degradation is real; the encoder is a measurable contributor. \\[4pt]
+\textbf{C: VEGAS Approach 1}
+  & Does VEGAS fail on diffuse-attention images?
+  & $\Delta = +0.021$ on degraded half, $P(\Delta \geq 0) = 0.929$. Directional
+    backfire.
+  & Attention-based steering is unreliable in the diffuse regime. \\[4pt]
+\textbf{C: VEGAS Approach 2A}
+  & Does VEGAS fail on feature-degraded images?
+  & $\Delta = 0.0000$ all groups; $\alpha \approx 0$ for all images.
+  & Rollout-based $\alpha$ cannot drive steering at all. \\[4pt]
+\textbf{C: Causal Approach 2B}
+  & Are attention-ranked patches causally privileged?
+  & Top-$K$ $\approx$ Bottom-$K$ $\approx$ Random; clean swap n.s., random-donor swap
+    $p = 0.0028$.
+  & Attention rank is causally inert; patch content matters but is not trivially
+    swappable. \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \subsection{Limitations}
 
-\textbf{Sample size.} 500 images for Tracks A and B, and 50-image sub-samples for the causal experiments in Approach 2B. Track B effect sizes ($\Delta\text{acc} \approx -0.035$) are statistically significant but modest. The Approach 1 binary-degraded result is directionally strong ($P = 0.929$) but its 95\% CI includes zero ($[-0.009, +0.045]$). The Approach 2B causal experiments have $n = 50$, which limits power: only the random-donor swap reaches significance ($p = 0.0028$); the within-image ablation conditions do not. Replication on a larger sample would tighten the inference.
+\textbf{Sample size.} 500 images for Tracks A and B, and 50-image sub-samples for the
+causal experiments in Approach 2B. Track B effect sizes
+($\Delta\mathrm{acc} \approx -0.035$) are statistically significant but modest. The
+Approach 1 binary-degraded result is directionally strong ($P = 0.929$) but its 95\%
+CI includes zero ($[-0.009, +0.045]$). The Approach 2B causal experiments have
+$n = 50$, which limits power: only the random-donor swap reaches significance
+($p = 0.0028$); the within-image ablation conditions do not. Replication on a larger
+sample would tighten the inference.
 
-\textbf{Causality.} Track B is correlational. The Approach 2B ablation confirms one causal direction (attention rank is not informative) but the patch-swap experiment is inconclusive on whether degraded patch content directly causes hallucination. A negative swap result is consistent both with patches being non-causal and with isolated patch swaps being too small a perturbation to reverse a global generation pattern. A larger-K swap, or a swap at multiple layers, would help disambiguate.
+\textbf{Causality.} Track B is correlational. The Approach 2B ablation confirms one
+causal direction (attention rank is not informative) but the patch-swap experiment is
+inconclusive on whether degraded patch content directly causes hallucination. A negative
+swap result is consistent both with patches being non-causal and with isolated patch
+swaps being too small a perturbation to reverse a global generation pattern. A larger-$K$
+swap, or a swap at multiple layers, would help disambiguate.
 
-\textbf{Track C implementations.} The three approaches use different signals for the steering input (raw final-layer attention vs.\ rollout-derived $\alpha$ vs.\ direct patch zeroing), different precisions, different prompts, and different stratifications. We report all three because we ran all three, but the disagreement between them is itself a limitation: the result depends on implementation choices that the published VEGAS paper does not fully specify.
+\textbf{Track C implementations.} The three approaches use different signals for the
+steering input (raw final-layer attention vs.\ rollout-derived $\alpha$ vs.\ direct
+patch zeroing), different precisions, different prompts, and different stratifications.
+We report all three because we ran all three, but the disagreement between them is
+itself a limitation: it shows that the result depends on implementation choices that the
+published VEGAS paper does not fully specify.
 
-\textbf{Scope cuts.} Of the four experiments listed in the original proposal, the VMamba and ImageNet-C robustness comparison was not run due to compute and time constraints. POPE evaluation across three adversarial splits was scoped out in favour of CHAIR$_i$ as the primary metric. Both are recorded in Future Work.
+\textbf{Scope cuts.} Of the four experiments listed in the original proposal, the VMamba
+and ImageNet-C robustness comparison was not run due to compute and time constraints.
+POPE evaluation across three adversarial splits was scoped out in favour of
+$\mathrm{CHAIR}_i$ as the primary metric. Both are recorded in Future Work.
 
-\textbf{Probe categories.} Only 17 of 80 COCO categories had at least 20 positive examples in the 500-image sample. Rare categories may behave differently and were not included in the probe analysis.
+\textbf{Probe categories.} Only 17 of 80 COCO categories had at least 20 positive
+examples in the 500-image sample. Rare categories may behave differently and were not
+included in the probe analysis.
 
+% ============================================================
 \section{Conclusions and Future Work}
+% ============================================================
 
 \subsection{Conclusions}
 
-We ran three controlled experiments on whether LLaVA-1.5-7B's ViT visual encoder is failing on images that lead to hallucination. The short answer is yes, but not in the way the literature usually expects. Track A finds no signal in attention geometry. Track B finds a consistent significant signal in patch-embedding feature content. Track C, in three configurations, shows that an attention-based mitigation method either backfires on diffuse-attention images (Approach 1, 4-bit, entropy-stratified) or fails to activate at all because rollout attention is uniformly diffuse (Approach 2A, fp16, quality-stratified), and that direct patch ablation at Track B's most discriminative layer does not single out attention-ranked patches as causally privileged (Approach 2B). A patch-swap follow-up shows that random unrelated patch content significantly worsens hallucination but matched-clean patches do not significantly help, which means Track B's signal is real but not trivially reversible.
+We ran three controlled experiments on whether LLaVA-1.5-7B's ViT visual encoder is
+failing on images that lead to hallucination. The short answer is yes, but not in the
+way the literature usually expects. Track A finds no signal in attention geometry.
+Track B finds a consistent and significant signal in patch-embedding feature content.
+Track C, in three configurations, shows that an attention-based mitigation method either
+backfires on diffuse-attention images (Approach 1, 4-bit, entropy-stratified) or fails
+to activate at all because rollout attention is uniformly diffuse (Approach 2A, fp16,
+quality-stratified), and that direct patch ablation at Track B's most discriminative
+layer does not single out attention-ranked patches as causally privileged
+(Approach 2B). A patch-swap follow-up shows that random unrelated patch content
+significantly worsens hallucination but matched-clean patches do not significantly help,
+which means Track B's signal is real but not trivially reversible.
 
-The four numbers that carry the project: $\rho = 0.003$ (Track A null), $\Delta\text{acc} = -0.035$ across layers at $p < 0.005$ (Track B positive), $P(\Delta \geq 0) = 0.929$ on the degraded half of Approach 1 (directional VEGAS backfire), and $p = 0.0028$ for the random-donor patch swap (Approach 2B causal observation). Methods that trust ViT attention as a corrective signal address the wrong quantity. Future hallucination mitigation for LLaVA-style models should target patch embedding quality at mid-late ViT layers (around layer 18) rather than attention redistribution.
+The four measurements anchoring the project's empirical contribution are
+$\rho = 0.003$ (Track A null), $\Delta\mathrm{acc} = -0.035$ across layers at
+$p < 0.005$ (Track B positive), $P(\Delta \geq 0) = 0.929$ on the degraded half of
+Approach 1 (directional VEGAS backfire), and $p = 0.0028$ for the random-donor patch
+swap (Approach 2B causal observation). Methods that trust ViT attention as a
+corrective signal address the wrong quantity. Future hallucination mitigation for
+LLaVA-style models should target patch embedding quality at mid-late ViT layers (around
+layer 18) rather than attention redistribution.
 
 \subsection{Future Work}
 
-\textbf{Reconcile the three Track C approaches.} The most useful next step is a fourth Track C run that combines the strengths of all three: full fp16 model (no quantization confound, as in Approach 2), raw final-layer [CLS]-to-patch attention as the steering signal (so the intervention has real magnitude, as in Approach 1), blending at $\lambda = 0.5$, and stratifying by Track B per-image probe accuracy (since probe accuracy is correlated with hallucination outcome and entropy is not). This requires Track B to export per-image probe accuracy, which the current outputs do not contain. Generating that file is straightforward from the cached patch embeddings and the trained probes; it does not require any new model inference. The resulting experiment would be the cleanest causal test of whether VEGAS specifically fails on encoder-degraded images.
+\textbf{Reconcile the three Track C approaches.} The most useful next step is a fourth
+Track C run that combines the strengths of all three: full fp16 model (no quantization
+confound), raw final-layer [CLS]-to-patch attention as the steering signal (so the
+intervention has real magnitude), blending at $\lambda = 0.5$ as in Approach 1, and
+stratifying by Track B per-image probe accuracy (since probe accuracy is correlated with
+hallucination outcome and entropy is not). This requires Track B to export per-image
+probe accuracy, which is straightforward from the cached patch embeddings and the
+trained probes; it does not require any new model inference. The resulting experiment
+would be the cleanest causal test of whether VEGAS specifically fails on encoder-degraded
+images.
 
-\textbf{Investigating the discrepancy between approaches.} The three approaches differ in three axes (precision, prompt, steering signal) and in the stratifier and intervention type. A factorial follow-up could vary each axis independently to isolate which factor drives each result. The hypothesis these experiments would test is that the Track C result is determined almost entirely by the steering signal choice (raw final-layer attention vs.\ rollout-derived $\alpha$ vs.\ direct ablation), with quantization, prompt, and stratifier as second-order factors.
+\textbf{Investigating the discrepancy between approaches.} The three approaches differ
+in three axes (precision, prompt, steering signal) and in the stratifier and
+intervention type. A factorial follow-up could vary each axis independently to isolate
+which factor drives each result. The hypothesis these experiments would test is that
+the Track C result is determined almost entirely by the steering signal choice (raw
+final-layer attention vs.\ rollout-derived $\alpha$ vs.\ direct ablation), with
+quantization, prompt, and stratifier as second-order factors.
 
-\textbf{Stronger causal patch ablation.} Scale the Approach 2B ablation experiment from $n = 50$ to the full 500 images, vary K (the number of ablated patches) across $\{20, 50, 100, 200\}$, and add a sham-layer control (run the same procedure at layer 6 where probe accuracy is lower). A targeted ablation that produces a significantly larger CHAIR change than random and sham controls would tighten the causal claim. Pre-registered effect size: paired Wilcoxon, minimum detectable $\Delta$CHAIR$_i = 0.05$, $\alpha = 0.01$, two-sided.
+\textbf{Stronger causal patch ablation.} Scale the Approach 2B ablation experiment from
+$n = 50$ to the full 500 images, vary $K$ across $\{20, 50, 100, 200\}$, and add a
+sham-layer control (run the same procedure at layer 6 where probe accuracy is lower).
+A targeted ablation that produces a significantly larger CHAIR change than random and
+sham controls would tighten the causal claim. Pre-registered effect size: paired
+Wilcoxon, minimum detectable $\Delta\mathrm{CHAIR}_i = 0.05$, $\alpha = 0.01$,
+two-sided.
 
-\textbf{Multi-layer and larger-K patch swaps.} The negative matched-clean swap result in Approach 2B may reflect the swap being too small. A multi-layer swap (replace patches at layers 6, 12, and 18 simultaneously) and larger-K swaps ($K = 200$) would test whether the signal is stronger when more of the patch content is replaced.
+\textbf{Multi-layer and larger-$K$ patch swaps.} The negative matched-clean swap result
+in Approach 2B may reflect the swap being too small. A multi-layer swap (replace
+patches at layers 6, 12, and 18 simultaneously) and larger-$K$ swaps ($K = 200$) would
+test whether the signal is stronger when more of the patch content is replaced.
 
-\textbf{VMamba and ImageNet-C robustness.} The fourth experiment in the original proposal was not run. Compare ViT-L/14 against VMamba-Small on a 5000-image stratified subsample of ImageNet-C across 15 corruption types and 5 severity levels. The hypothesis is that fine-grained corruptions (pixel noise, pixelation, JPEG) trigger the patch-spread failure mode our Track B results imply, while coarse corruptions (blur, brightness) do not. SSM-based encoders, by their sequential design, should not exhibit this asymmetry.
+\textbf{VMamba and ImageNet-C robustness.} Compare ViT-L/14 against VMamba-Small on a
+5000-image stratified subsample of ImageNet-C across 15 corruption types and 5 severity
+levels. The hypothesis is that fine-grained corruptions (pixel noise, pixelation, JPEG)
+trigger the patch-spread failure mode our Track B results imply, while coarse
+corruptions (blur, brightness) do not. SSM-based encoders, by their sequential design,
+should not exhibit this asymmetry.
 
-\textbf{POPE evaluation.} Run POPE across the three adversarial splits (random, popular, adversarial) on the existing 500 captions. POPE asks binary questions and does not require new inference; it can be applied to the saved captions directly. Adding it would let us check whether the Track A null and Track B positive replicate under a binary-probe metric.
+\textbf{POPE evaluation.} Run POPE across the three adversarial splits (random, popular,
+adversarial) on the existing 500 captions. POPE asks binary questions and does not
+require new inference; it can be applied to the saved captions directly. Adding it would
+let us check whether the Track A null and Track B positive replicate under a
+binary-probe metric.
 
-\paragraph{Code and data.} Notebooks, intermediate CSVs, figures, and the report sources are available at \repourl.
+\textbf{Code and data.} Notebooks, intermediate CSVs, figures, and the report sources
+are available at \url{https://github.com/NikhilAdyapak/vit-hallucination-llava}.
 
-\section*{References}
-\small
-\begin{enumerate}[label={[\arabic*]},leftmargin=22pt,itemsep=2pt,topsep=2pt]
-\item Li, Y., Du, Y., Zhou, K., Wang, J., Zhao, W. X., and Wen, J.-R. Evaluating object hallucination in large vision-language models. \emph{EMNLP}, 2023. \label{li2023pope}
-\item Rohrbach, A., Hendricks, L. A., Burns, K., Darrell, T., and Saenko, K. Object hallucination in image captioning. \emph{EMNLP}, 2018. \label{rohrbach2018chair}
-\item Abnar, S., and Zuidema, W. Quantifying attention flow in transformers. \emph{ACL}, 2020. arXiv:2005.00928. \label{abnar2020rollout}
-\item Seo, J., et al. VEGAS: ViT-attention-guided steering for VLM hallucination mitigation. arXiv:2512.12089, 2024. \label{vegas}
-\item Raghu, M., Unterthiner, T., Kornblith, S., Zhang, C., and Dosovitskiy, A. Do vision transformers see like convolutional neural networks? \emph{NeurIPS}, 2021. \label{raghu2021vit}
-\item Liu, H., Li, C., Wu, Q., and Lee, Y. J. Visual instruction tuning. \emph{NeurIPS}, 2023. \label{liu2023llava}
-\item Dosovitskiy, A., Beyer, L., Kolesnikov, A., et al. An image is worth $16 \times 16$ words: Transformers for image recognition at scale. \emph{ICLR}, 2021. arXiv:2010.11929. \label{vit}
-\item Seo, J., et al. ViT hallucination analysis in vision-language models. arXiv:2510.09008, 2025. \label{seo}
-\end{enumerate}
+% ============================================================
+%  References
+% ============================================================
+\bibliographystyle{plainnat}
+\begin{thebibliography}{10}
 
+\bibitem[Abnar and Zuidema, 2020]{abnar2020rollout}
+Abnar, S.\ and Zuidema, W.
+\newblock Quantifying attention flow in transformers.
+\newblock In \textit{ACL}, 2020. arXiv:2005.00928.
+
+\bibitem[Dosovitskiy et al., 2021]{dosovitskiy2021vit}
+Dosovitskiy, A., Beyer, L., Kolesnikov, A., et al.
+\newblock An image is worth $16{\times}16$ words: Transformers for image
+  recognition at scale.
+\newblock In \textit{ICLR}, 2021. arXiv:2010.11929.
+
+\bibitem[Li et al., 2023]{li2023pope}
+Li, Y., Du, Y., Zhou, K., Wang, J., Zhao, W.\ X., and Wen, J.-R.
+\newblock Evaluating object hallucination in large vision-language models.
+\newblock In \textit{EMNLP}, 2023.
+
+\bibitem[Liu et al., 2023]{liu2023llava}
+Liu, H., Li, C., Wu, Q., and Lee, Y.\ J.
+\newblock Visual instruction tuning.
+\newblock In \textit{NeurIPS}, 2023.
+
+\bibitem[Raghu et al., 2021]{raghu2021vit}
+Raghu, M., Unterthiner, T., Kornblith, S., Zhang, C., and Dosovitskiy, A.
+\newblock Do vision transformers see like convolutional neural networks?
+\newblock In \textit{NeurIPS}, 2021.
+
+\bibitem[Rohrbach et al., 2018]{rohrbach2018chair}
+Rohrbach, A., Hendricks, L.\ A., Burns, K., Darrell, T., and Saenko, K.
+\newblock Object hallucination in image captioning.
+\newblock In \textit{EMNLP}, 2018.
+
+\bibitem[Seo et al., 2024]{seo2024vegas}
+Seo, J., et al.
+\newblock VEGAS: ViT-attention-guided steering for VLM hallucination
+  mitigation.
+\newblock arXiv:2512.12089, 2024.
+
+\bibitem[Seo et al., 2025]{seo2025vit}
+Seo, J., et al.
+\newblock ViT hallucination analysis in vision-language models.
+\newblock arXiv:2510.09008, 2025.
+
+\end{thebibliography}
+
+% ============================================================
+%  Appendices
+% ============================================================
 \appendix
+
 \section{Track A: Per-Layer Entropy Gap}
 
 \begin{table}[h]
 \centering
 \small
 \caption{Per-layer entropy gap (hallucinating $-$ clean) across all 24 ViT layers.}
-\label{tab:appA}
-\renewcommand{\arraystretch}{1.1}
-\begin{tabular}{ccc}
+\label{tab:perlayer}
+\begin{tabular}{lll}
 \toprule
-\textbf{Layer range} & \textbf{Gap $\Delta$ (nats)} & \textbf{Direction} \\
+Layer range & Gap $\Delta$ (nats) & Direction \\
 \midrule
-Layers 1--13 & $\approx 0.01$ to $0.02$ & hallucinating $>$ clean (small) \\
-Layer 14 & $\approx 0.00$ (crossing) & --- \\
-Layers 15--24 & rises to $0.130$ at layer 19 & hallucinating $>$ clean \\
+Layers 1--13   & $\approx 0.01$ to $0.02$    & hallucinating $>$ clean (small) \\
+Layer 14       & $\approx 0.00$ (crossing)   & --- \\
+Layers 15--24  & rises to 0.130 at layer 19  & hallucinating $>$ clean \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The gap is largest at layer 19 ($\Delta = 0.130$ nats) but small relative to within-group variance ($\sigma_{\text{within}} \approx 0.4$ nats). It does not translate into a predictive signal at the image level, as Spearman, Welch t, and Mann-Whitney all return null on the rollout-level entropy.
+The gap is largest at layer 19 ($\Delta = 0.130$ nats) but small relative to
+within-group variance ($\sigma_{\mathrm{within}} \approx 0.4$ nats). It does not
+translate into a predictive signal at the image level, as Spearman, Welch $t$, and
+Mann-Whitney all return null on the rollout-level entropy.
 
 \section{Track B: Probe Categories}
 
-The 17 COCO categories with at least 20 positive examples in the 500-image sample, used for the linear probe analysis: \emph{backpack, bed, bench, book, bottle, bowl, car, cell phone, chair, cup, dining table, handbag, laptop, person, sink, truck, umbrella.}
+The 17 COCO categories with at least 20 positive examples in the 500-image sample, used
+for the linear probe analysis: \textit{backpack, bed, bench, book, bottle, bowl, car,
+cell phone, chair, cup, dining table, handbag, laptop, person, sink, truck, umbrella.}
 
 \section{Track C Approach 2A: Observed Concentration Distribution}
 
-All 500 images had concentration $\alpha \in [0.002, 0.010]$ with mean $\approx 0.005$. This is consistent with the Track A finding that rollout entropy is nearly maximal ($\bar H \approx 6.321$ nats, max $= \log 576 \approx 6.356$ nats). The gap between observed mean entropy and maximum entropy is only $\approx 0.035$ nats, which maps to $\alpha \approx 0.005$. VEGAS steers by $(1 + \alpha) \approx 1.005$, effectively unity, which does not change greedy-decoded outputs on any image.
+All 500 images had concentration $\alpha \in [0.002, 0.010]$ with mean $\approx 0.005$.
+This is consistent with the Track A finding that rollout entropy is nearly maximal
+($\bar{H} \approx 6.321$ nats, $\max = \log 576 \approx 6.356$ nats). The gap between
+observed mean entropy and maximum entropy is only $\approx 0.035$ nats, which maps to
+$\alpha \approx 0.005$. VEGAS steers by $(1 + \alpha) \approx 1.005$, effectively
+unity, which does not change greedy-decoded outputs on any image.
 
 \section{Track C Approach 2B: Per-Image Sample Sizes and K Values}
 
-Experiment 1 used 50 images (25 hallucinating, 25 clean) with $K = 58$ ablated patches per condition (10\% of 576 patch tokens). Experiment 2 used 50 hallucinating-clean image pairs matched on shared COCO ground-truth categories (range 3--7 shared categories) with $K = 58$ swapped patches per condition. The intervention layer is ViT encoder layer 17 (0-indexed; equivalent to layer 18 in the 1-indexed convention used by Track B). All conditions used greedy decoding and the prompt \emph{``Describe everything you see in this image in one sentence.''} for consistency with Approach 2A.
+Experiment 1 used 50 images (25 hallucinating, 25 clean) with $K = 58$ ablated patches
+per condition (10\% of 576 patch tokens). Experiment 2 used 50 hallucinating-clean
+image pairs matched on shared COCO ground-truth categories (range 3--7 shared
+categories) with $K = 58$ swapped patches per condition. The intervention layer is ViT
+encoder layer 17 (0-indexed; equivalent to layer 18 in the 1-indexed convention used by
+Track B). All conditions used greedy decoding and the prompt \textit{``Describe
+everything you see in this image in one sentence.''} for consistency with Approach 2A.
 
 \section{Repository Layout}
 
-The accompanying repository (\repourl) contains:
+The accompanying repository
+(\url{https://github.com/NikhilAdyapak/vit-hallucination-llava}) contains:
 
-\begin{itemize}[itemsep=1pt,topsep=2pt,leftmargin=18pt]
-\item \texttt{notebooks/track\_a/} --- three Track A notebooks: LLaVA inference + CHAIR scoring (notebook 1), ViT attention rollout extraction (notebook 2), entropy analysis + Track C handoff (notebook 3).
-\item \texttt{notebooks/track\_b/TrackB\_Linear\_Probing.ipynb} --- patch embedding extraction, probe training, and statistical tests.
-\item \texttt{notebooks/track\_c/} --- four Track C variants: \texttt{v0\_initial\_attempt.ipynb} (superseded), \texttt{v1\_4bit\_entropy\_stratified.ipynb} (Approach 1), \texttt{v2\_fp16\_quality\_stratified.ipynb} (Approach 2 part A), \texttt{v3\_causal\_ablation\_swap.ipynb} (Approach 2 part B). The \texttt{trackc\_package/} directory contains the Python module used by Approach 1's ablation pipeline.
-\item \texttt{data/track\_a\_outputs/} --- \texttt{chair\_labels.csv}, \texttt{entropy\_ranks.csv}, \texttt{sampled\_image\_ids.json}.
-\item \texttt{data/track\_c\_outputs/} --- vanilla and VEGAS captions (4-bit) and the bootstrap delta tables for Approach 1.
-\item \texttt{figures/} --- Track A entropy distribution, per-layer entropy, quartile analysis, Spearman scatter.
-\item \texttt{reports/} --- this final report, the proposal, the project rubric, and the Track A + B progress report.
+\begin{itemize}
+  \item \texttt{notebooks/track\_a/} --- three Track A notebooks:
+        \texttt{TRACKA\_1ST\_INFERENCE\_CHAIR.ipynb} (LLaVA inference + CHAIR scoring),
+        \texttt{TrackA\_2ND\_Attention\_Rollout.ipynb} (ViT attention rollout
+        extraction), and
+        \texttt{TrackA\_3RD\_Entropy\_Analysis.ipynb} (entropy statistics + Track C
+        handoff).
+  \item \texttt{notebooks/track\_b/TrackB\_Linear\_Probing.ipynb} --- patch embedding
+        extraction, probe training (4 layers $\times$ 17 categories), and statistical
+        tests.
+  \item \texttt{notebooks/track\_c/} --- four Track C variants:
+        \texttt{v0\_initial\_attempt.ipynb} (superseded, fp16 vs.\ 4-bit comparison
+        issue), \texttt{v1\_4bit\_entropy\_stratified.ipynb} (Approach 1),
+        \texttt{v2\_fp16\_quality\_stratified.ipynb} (Approach 2 part A), and
+        \texttt{v3\_causal\_ablation\_swap.ipynb} (Approach 2 part B). The
+        \texttt{trackc\_package/} directory contains the Python module used by Approach
+        1's ablation pipeline.
+  \item \texttt{data/track\_a\_outputs/} --- \texttt{chair\_labels.csv},
+        \texttt{entropy\_ranks.csv}, \texttt{sampled\_image\_ids.json}.
+  \item \texttt{data/track\_c\_outputs/} --- vanilla and VEGAS captions (4-bit) and
+        the bootstrap delta tables for Approach 1.
+  \item \texttt{figures/} --- all 14 figures referenced in this report.
+  \item \texttt{reports/} --- this final report (\texttt{Final\_Report.tex},
+        \texttt{CS639\_FinalReport.pdf}), the proposal, the project rubric, and the
+        Track A + B progress report.
 \end{itemize}
 
 \end{document}

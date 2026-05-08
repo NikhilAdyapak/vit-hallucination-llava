@@ -61,8 +61,6 @@ Arihant Jha \quad Saurabh Rajesh Pandey \quad Yuvarraj Sriramkumar\\
 Nikhil Adyapak \quad Asish Das \quad Siddhartha Pathapati\\[4pt]
 University of Wisconsin--Madison\\
 CS 639: Introduction to Foundation Models, Spring 2026\\[4pt]
-\textit{Code and data:}
-\url{https://github.com/NikhilAdyapak/vit-hallucination-llava}\\[6pt]
 May 2026
 \end{center}
 
@@ -194,8 +192,7 @@ $24 \times 24 = 576$ patch tokens. The language model is Vicuna-7B with 32 decod
 layers and a 4096-dim hidden state.
 
 \textbf{Dataset.} 500 randomly sampled images from the COCO 2017 validation set, drawn
-with seed 639. The same image IDs are used across all three tracks;
-\texttt{sampled\_image\_ids.json} carries the order.
+with seed 639. The same image IDs are used across all three tracks.
 
 \textbf{Hallucination ground truth.} $\mathrm{CHAIR}_i$ scoring against COCO instance
 annotations. An image is labelled \emph{hallucinating} if $\mathrm{CHAIR}_i > 0$,
@@ -206,7 +203,7 @@ $\mathrm{CHAIR}_i$ scores and the class balance.
 
 \begin{figure}[!ht]
   \centering
-  \includegraphics[width=\cw]{chair_distribution.png}
+  \includegraphics[width=0.78\cw]{chair_distribution.png}
   \caption{Left: distribution of $\mathrm{CHAIR}_i$ scores across the 500-image sample
            (mean $= 0.319$, right-skewed with a spike at zero for clean images).
            Right: class balance; 329 images (65.8\%) are flagged as hallucinating.}
@@ -251,9 +248,7 @@ images, and become diffuse or misfocused in hallucinating images?
 
 The captioning prompt is \textit{``Describe everything you see in this image in detail,
 listing all objects, people, and animals visible.''} which yields long
-object-enumeration captions. Outputs are produced by three notebooks under
-\texttt{notebooks/track\_a/}: inference + CHAIR scoring, attention rollout extraction,
-and entropy analysis + Track C handoff.
+object-enumeration captions.
 
 \subsection{Results}
 
@@ -290,7 +285,7 @@ Mann-Whitney $U$ (entropy)  & --- & --- & $U$ stat, $p = 0.39$ / null \\
 
 \begin{figure}[!ht]
   \centering
-  \includegraphics[width=\cw]{figure_entropy_distribution.png}
+  \includegraphics[width=0.78\cw]{figure_entropy_distribution.png}
   \caption{Track A: [CLS] rollout entropy distributions for hallucinating vs.\ clean
            images (left) and Mann-Whitney group comparison (right). The two
            distributions overlap almost completely ($d = 0.039$, $p = 0.39$).}
@@ -299,7 +294,7 @@ Mann-Whitney $U$ (entropy)  & --- & --- & $U$ stat, $p = 0.39$ / null \\
 
 \begin{figure}[!ht]
   \centering
-  \includegraphics[width=\cw]{figure_quartile_analysis.png}
+  \includegraphics[width=0.78\cw]{figure_quartile_analysis.png}
   \caption{Track A: hallucination rate (left) and mean $\mathrm{CHAIR}_i$ (right) by
            attention-entropy quartile. Neither panel shows a monotonic trend, confirming
            the null result.}
@@ -308,7 +303,7 @@ Mann-Whitney $U$ (entropy)  & --- & --- & $U$ stat, $p = 0.39$ / null \\
 
 \begin{figure}[!ht]
   \centering
-  \includegraphics[width=\cw]{figure_per_layer_entropy.png}
+  \includegraphics[width=0.78\cw]{figure_per_layer_entropy.png}
   \caption{Per-layer [CLS] entropy for hallucinating vs.\ clean images across all 24
            ViT layers. A gap appears at layers 16--24 and reaches its maximum at layer
            19 ($\Delta = 0.130$ nats), but within-group variance is large and the gap
@@ -318,7 +313,7 @@ Mann-Whitney $U$ (entropy)  & --- & --- & $U$ stat, $p = 0.39$ / null \\
 
 \begin{figure}[!ht]
   \centering
-  \includegraphics[width=\cw]{figure_spearman_scatter.png}
+  \includegraphics[width=0.78\cw]{figure_spearman_scatter.png}
   \caption{Spearman scatter of rollout entropy vs.\ $\mathrm{CHAIR}_i$ score
            ($\rho = 0.003$, $p = 0.94$). There is no relationship between attention
            diffuseness and hallucination severity.}
@@ -356,7 +351,7 @@ object identity less reliably on hallucinating images?
         probe layers $L \in \{6, 12, 18, 24\}$. We changed from the proposed
         $\{8, 16, 24\}$ to give uniform depth coverage of the 24-layer encoder.
   \item For each layer, store both the [CLS] vector (1024-d) and the mean-pooled patch
-        embedding (1024-d) and cache to \texttt{patch\_embeddings\_cache.npz}.
+        embedding (1024-d).
   \item For each of the 80 COCO categories with at least 20 positive examples in our
         sample, train a binary $\ell_2$-regularised logistic regression probe
         (\texttt{lbfgs} solver) under 5-fold cross-validation, predicting object
@@ -370,9 +365,7 @@ object identity less reliably on hallucinating images?
         signed-rank test.
 \end{enumerate}
 
-A total of $4 \times 17 = 68$ probes were trained. The full pipeline is in
-\texttt{notebooks/track\_b/TrackB\_Linear\_Probing.ipynb} and produces
-\texttt{probe\_results.csv}, \texttt{probe\_stats.csv}, and four figures.
+A total of $4 \times 17 = 68$ probes were trained.
 
 \subsection{Results}
 
@@ -396,10 +389,10 @@ hypothesis.
 
 \begin{table}[!ht]
 \centering
-\small
 \caption{Track B linear probe accuracy across ViT depth, stratified by hallucination
          outcome. All four layers reach significance at $\alpha = 0.005$.}
 \label{tab:trackb}
+\resizebox{\textwidth}{!}{%
 \begin{tabular}{lcccccc}
 \toprule
 \textbf{Layer} & \textbf{Mean Acc} & \textbf{Mean AUC}
@@ -413,15 +406,16 @@ hypothesis.
 18 & 0.946 & 0.905 & 0.937 & 0.964 & $-0.027$ & $4.2 \times 10^{-3}$ \\
 24 & 0.939 & 0.875 & 0.926 & 0.964 & $-0.038$ & $1.5 \times 10^{-4}$ \\
 \midrule
-\multicolumn{5}{l}{\small Mean $\Delta\mathrm{Acc}$ across all four layers:}
+\multicolumn{5}{l}{Mean $\Delta\mathrm{Acc}$ across all four layers:}
   & $-0.035$ & --- \\
 \bottomrule
-\end{tabular}
+\end{tabular}%
+}
 \end{table}
 
 \begin{figure}[!ht]
   \centering
-  \includegraphics[width=\cw]{figure_probe_accuracy_curves.png}
+  \includegraphics[width=0.78\cw]{figure_probe_accuracy_curves.png}
   \caption{Track B probe performance across ViT depth. Left: overall accuracy and
            ROC-AUC by layer, peaking at layer 18. Right: stratified accuracy for
            hallucinating vs.\ clean images, showing a persistent gap at every layer.}
@@ -430,7 +424,7 @@ hypothesis.
 
 \begin{figure}[!ht]
   \centering
-  \includegraphics[width=\cw]{figure_probe_accuracy_delta.png}
+  \includegraphics[width=0.78\cw]{figure_probe_accuracy_delta.png}
   \caption{Track B accuracy delta ($\mathrm{acc}_{\mathrm{hall}} -
            \mathrm{acc}_{\mathrm{clean}}$) by layer. Left: mean delta with confidence
            intervals, negative at every layer. Right: per-category distribution of
@@ -441,7 +435,7 @@ hypothesis.
 
 \begin{figure}[!ht]
   \centering
-  \includegraphics[width=\cw]{figure_probe_auc_heatmap.png}
+  \includegraphics[width=0.78\cw]{figure_probe_auc_heatmap.png}
   \caption{ROC-AUC per (layer, category). Object-discriminative information increases
            with depth and peaks around layer 18 for most categories. Small or
            visually subtle objects (backpack, bench, cell phone) benefit most from
@@ -451,7 +445,7 @@ hypothesis.
 
 \begin{figure}[!ht]
   \centering
-  \includegraphics[width=\cw]{figure_probe_auc_delta.png}
+  \includegraphics[width=0.78\cw]{figure_probe_auc_delta.png}
   \caption{ROC-AUC delta (hallucinating minus clean) by layer (left) and by category
            (right). Unlike the accuracy delta, the AUC delta is mixed across layers
            (positive at layers 12 and 18), consistent with the class-imbalance
@@ -558,10 +552,10 @@ VEGAS hurts ($\Delta \geq 0$). Two patterns emerge.
 
 \begin{table}[!ht]
 \centering
-\small
 \caption{Approach 1 (4-bit NF4, entropy-stratified). VEGAS minus vanilla, per
          stratum. Negative $\Delta$ means VEGAS reduces hallucination.}
 \label{tab:trackc_v1}
+\resizebox{\textwidth}{!}{%
 \begin{tabular}{lcccccr}
 \toprule
 \textbf{Stratum} & $n$ & \textbf{Vanilla $\mathrm{CHAIR}_i$}
@@ -580,7 +574,8 @@ Binary clean ($Q_1+Q_2$)          & 250 & 0.179 & 0.170 & $-0.008$
   & \textbf{0.929} \\
 All & 500 & 0.195 & 0.201 & $+0.006$ & $[-0.012,+0.024]$ & 0.760 \\
 \bottomrule
-\end{tabular}
+\end{tabular}%
+}
 \end{table}
 
 First, the per-quartile delta moves monotonically from $-0.017$ at $Q_1$ to $+0.025$
@@ -596,7 +591,7 @@ per-stratum breakdown is what reveals the actual signal.
 
 \begin{figure}[!ht]
   \centering
-  \includegraphics[width=\cw]{stratified_trackC.png}
+  \includegraphics[width=0.78\cw]{stratified_trackC.png}
   \caption{Approach 1: mean $\mathrm{CHAIR}_i$ (top) and hallucination rate (bottom)
            per attention-entropy quartile, vanilla LLaVA vs.\ VEGAS. VEGAS bars rise
            above the vanilla bars in $Q_3$ and $Q_4$, indicating backfire on
@@ -606,7 +601,7 @@ per-stratum breakdown is what reveals the actual signal.
 
 \begin{figure}[!ht]
   \centering
-  \includegraphics[width=\cw]{track_2.png}
+  \includegraphics[width=0.78\cw]{track_2.png}
   \caption{Approach 1: per-image scatter of $\Delta\mathrm{CHAIR}_i$ (VEGAS minus
            vanilla) against entropy quartile, with quartile mean lines. The trend
            toward backfire on diffuse-attention images is visible at the per-image
@@ -616,7 +611,7 @@ per-stratum breakdown is what reveals the actual signal.
 
 \begin{figure}[!ht]
   \centering
-  \includegraphics[width=\cw]{chair_trackc.png}
+  \includegraphics[width=0.78\cw]{chair_trackc.png}
   \caption{Approach 1: paired bootstrap 95\% confidence intervals on
            $\Delta$ mean $\mathrm{CHAIR}_i$ (VEGAS minus vanilla) per stratum.
            Intervals strictly below zero indicate VEGAS reliably reduces hallucination;
@@ -676,7 +671,7 @@ High vs.\ Low ($\Delta\mathrm{CHAIR}_i$) & --- & --- & --- & 1.000 \\
 
 \begin{figure}[!ht]
   \centering
-  \includegraphics[width=\cw]{figure_vegas_falsification.png}
+  \includegraphics[width=0.78\cw]{figure_vegas_falsification.png}
   \caption{Approach 2 part A: hallucination rate and $\Delta\mathrm{CHAIR}_i$ by
            quality group. Baseline and VEGAS bars are identical; all per-image
            $\Delta\mathrm{CHAIR}_i$ values are exactly zero.}
@@ -685,7 +680,7 @@ High vs.\ Low ($\Delta\mathrm{CHAIR}_i$) & --- & --- & --- & 1.000 \\
 
 \begin{figure}[!ht]
   \centering
-  \includegraphics[width=\cw]{figure_vegas_alpha_vs_delta.png}
+  \includegraphics[width=0.78\cw]{figure_vegas_alpha_vs_delta.png}
   \caption{Approach 2 part A: VEGAS concentration score $\alpha$ versus
            $\Delta\mathrm{CHAIR}_i$, stratified by quality group. All points fall on
            the zero line because the rollout-derived $\alpha \approx 0.005$ for every
@@ -723,11 +718,11 @@ change vs.\ baseline (Wilcoxon signed-rank) and hallucination-status flip (McNem
 
 \begin{table}[!ht]
 \centering
-\small
 \caption{Approach 2 part B causal ablation results. Wilcoxon signed-rank vs.\ baseline
          (paired, two-sided) for CHAIR change. McNemar tests hallucination-status flip
          for the matched-clean swap.}
 \label{tab:trackc_causal}
+\resizebox{\textwidth}{!}{%
 \begin{tabular}{llccc}
 \toprule
 \textbf{Experiment} & \textbf{Condition} & \textbf{Mean $\Delta\mathrm{CHAIR}_i$}
@@ -743,7 +738,8 @@ Exp 2 ($n=50$ pairs) & Matched-clean swap          & $+0.0461$ & $W = 46$ & 0.14
 Exp 2 (status flip)  & Clean swap (McNemar)
                      & hall$\to$clean = 3, clean$\to$hall = 5 & --- & 0.727 \\
 \bottomrule
-\end{tabular}
+\end{tabular}%
+}
 \end{table}
 
 \textbf{Experiment 1.} Top-$K$, bottom-$K$, and random-$K$ ablations are statistically
@@ -965,9 +961,6 @@ require new inference; it can be applied to the saved captions directly. Adding 
 let us check whether the Track A null and Track B positive replicate under a
 binary-probe metric.
 
-\textbf{Code and data.} Notebooks, intermediate CSVs, figures, and the report sources
-are available at \url{https://github.com/NikhilAdyapak/vit-hallucination-llava}.
-
 % ============================================================
 %  References
 % ============================================================
@@ -1070,37 +1063,5 @@ categories) with $K = 58$ swapped patches per condition. The intervention layer 
 encoder layer 17 (0-indexed; equivalent to layer 18 in the 1-indexed convention used by
 Track B). All conditions used greedy decoding and the prompt \textit{``Describe
 everything you see in this image in one sentence.''} for consistency with Approach 2A.
-
-\section{Repository Layout}
-
-The accompanying repository
-(\url{https://github.com/NikhilAdyapak/vit-hallucination-llava}) contains:
-
-\begin{itemize}
-  \item \texttt{notebooks/track\_a/} --- three Track A notebooks:
-        \texttt{TRACKA\_1ST\_INFERENCE\_CHAIR.ipynb} (LLaVA inference + CHAIR scoring),
-        \texttt{TrackA\_2ND\_Attention\_Rollout.ipynb} (ViT attention rollout
-        extraction), and
-        \texttt{TrackA\_3RD\_Entropy\_Analysis.ipynb} (entropy statistics + Track C
-        handoff).
-  \item \texttt{notebooks/track\_b/TrackB\_Linear\_Probing.ipynb} --- patch embedding
-        extraction, probe training (4 layers $\times$ 17 categories), and statistical
-        tests.
-  \item \texttt{notebooks/track\_c/} --- four Track C variants:
-        \texttt{v0\_initial\_attempt.ipynb} (superseded, fp16 vs.\ 4-bit comparison
-        issue), \texttt{v1\_4bit\_entropy\_stratified.ipynb} (Approach 1),
-        \texttt{v2\_fp16\_quality\_stratified.ipynb} (Approach 2 part A), and
-        \texttt{v3\_causal\_ablation\_swap.ipynb} (Approach 2 part B). The
-        \texttt{trackc\_package/} directory contains the Python module used by Approach
-        1's ablation pipeline.
-  \item \texttt{data/track\_a\_outputs/} --- \texttt{chair\_labels.csv},
-        \texttt{entropy\_ranks.csv}, \texttt{sampled\_image\_ids.json}.
-  \item \texttt{data/track\_c\_outputs/} --- vanilla and VEGAS captions (4-bit) and
-        the bootstrap delta tables for Approach 1.
-  \item \texttt{figures/} --- all 14 figures referenced in this report.
-  \item \texttt{reports/} --- this final report (\texttt{Final\_Report.tex},
-        \texttt{CS639\_FinalReport.pdf}), the proposal, the project rubric, and the
-        Track A + B progress report.
-\end{itemize}
 
 \end{document}

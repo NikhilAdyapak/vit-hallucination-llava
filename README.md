@@ -3,6 +3,7 @@
 A three-track empirical investigation of the ViT visual encoder.
 
 **CS 639: Introduction to Foundation Models | UW-Madison | Spring 2026**
+
 https://github.com/NikhilAdyapak/CS639_Foundation_Models
 
 **Team:** Arihant Jha, Saurabh Rajesh Pandey, Yuvarraj Sriramkumar, Nikhil Adyapak, Asish Das, Siddhartha Pathapati
